@@ -1,12 +1,12 @@
-import { redirect } from "next/navigation"
-import { auth0 } from "@/lib/afd/auth"
 import { authenticatedBackendClient } from "@/lib/afd/backend"
+import { requireSession } from "@/lib/afd/session"
 import type { Account, BrokerStatus } from "@/lib/afd/contracts"
 import { AppShell } from "@/components/desk/app-shell"
 
+export const dynamic = "force-dynamic"
+
 export default async function DeskLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth0.getSession().catch(() => null)
-  if (!session) redirect("/login")
+  const session = await requireSession("/dashboard")
   let accounts: Account[] = []; let status: BrokerStatus | null = null; let backendOnline = false
   try {
     const request = await authenticatedBackendClient()

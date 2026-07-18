@@ -31,7 +31,7 @@ export async function forwardWithAuthorization<T>(path: string, authorization: s
 }
 
 export async function authenticatedBackendClient() {
-  const session = await auth0.getSession().catch(() => null)
+  const session = await auth0.getSession()
   if (!session) throw new AfdBackendError(401, "Please log in.", "not_authenticated", {}, "authentication")
   let token: string
   try { ({ token } = await auth0.getAccessToken()) } catch { throw new AfdBackendError(401, "Could not get backend access token.", "token_acquisition_failed", {}, "authentication") }
