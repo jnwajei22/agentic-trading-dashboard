@@ -1,28 +1,14 @@
-import { Inter } from "next/font/google"
-import "./globals.css"
+import type { Metadata } from "next"
 import { ThemeProvider } from "@/components/theme-provider"
+import "./globals.css"
 
-const inter = Inter({ subsets: ["latin"] })
-
-export const metadata = {
-  title: "KokonutUI Dashboard",
-  description: "A modern dashboard with theme switching",
-    generator: 'v0.app'
+export const metadata: Metadata = {
+  title: { default: "Agentic Trading Desk", template: "%s | Agentic Trading Desk" },
+  description: "Forex research, execution, and autonomous trading workspace",
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          {children}
-        </ThemeProvider>
-      </body>
-    </html>
-  )
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <html lang="en" suppressHydrationWarning><body>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>{children}</ThemeProvider>
+  </body></html>
 }
-
