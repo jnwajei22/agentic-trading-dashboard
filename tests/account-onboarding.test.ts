@@ -19,7 +19,7 @@ test("multiple discovered TradeLocker accounts are all normalized for rendering"
 test("account selection occurs only from an explicit click", () => {
   const selector = readFileSync(join(process.cwd(), "app/select-account/selector.tsx"), "utf8")
   assert.match(selector, /discovered\.map/)
-  assert.match(selector, /onClick=\{\(\) => select\(account\)\}/)
+  assert.match(selector, /onClick=\{\(\)=>void select\(account\)\}/)
   assert.doesNotMatch(selector, /useEffect|select\(discovered\[0\]\)|select\(accounts\[0\]\)/)
   assert.match(selector, /router\.replace\(["']\/dashboard\?connected=1["']\)/)
 })

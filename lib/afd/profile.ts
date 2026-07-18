@@ -18,6 +18,7 @@ export function validateProfile(profile: ExecutionProfileV2) {
 export function buildProfilePatch(original: ExecutionProfileV2, current: ExecutionProfileV2): ProfilePatch {
   const result: ProfilePatch = {}
   for (const key of Object.keys(current) as Array<keyof ExecutionProfileV2>) {
+    if (key === "schedule_policy") continue
     if (JSON.stringify(original[key]) !== JSON.stringify(current[key])) Object.assign(result, { [key]: current[key] })
   }
   return result

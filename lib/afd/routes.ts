@@ -6,6 +6,8 @@ const exact: Record<string, readonly string[]> = {
   "autonomous-controls": ["GET", "PATCH"], "autonomous-controls/audit": ["GET"],
   "autonomous-runs": ["GET"], "autonomous-schedules": ["GET"], "autonomous-daily-summary": ["GET"],
   "autonomous-worker-health": ["GET"], "demo-executions": ["GET"], "operations/kill-switch/enable": ["POST"],
+  "markets/overview": ["GET"], "markets/search": ["GET"], "markets/news": ["GET"],
+  "markets/calendar": ["GET"], "markets/macro": ["GET"],
 }
 const dynamic: Array<[RegExp, readonly string[]]> = [
   [/^broker\/accounts\/[^/]+\/(alias|default|disable)$/, ["PUT"]],
@@ -15,6 +17,8 @@ const dynamic: Array<[RegExp, readonly string[]]> = [
   [/^execution-profiles\/[^/]+\/autonomy\/status$/, ["GET"]],
   [/^execution-profiles\/[^/]+\/autonomy\/schedule$/, ["POST"]],
   [/^accounts\/[^/]+\/(instruments|market-groups|market-universe)$/, ["GET"]],
+  [/^accounts\/[^/]+\/tradability\/[^/]+$/, ["GET"]],
+  [/^markets\/[^/]+$/, ["GET"]],
   [/^autonomous-runs\/[^/]+\/audit$/, ["GET"]],
   [/^autonomous-schedules\/[^/]+$/, ["GET", "PUT", "DELETE"]],
   [/^autonomous-schedules\/[^/]+\/(pause|resume)$/, ["POST"]],

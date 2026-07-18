@@ -4,6 +4,7 @@ export type DiscoveredAccount = {
   name: string
   currency: string
   environment: string
+  brokerName: string
   available: boolean
 }
 
@@ -29,6 +30,7 @@ export function normalizeDiscoveredAccounts(rows: Array<Record<string, unknown>>
       name: text(row, "name", "accountName", "account_name") || `Account ${accountNumber}`,
       currency: text(row, "currency") || "Unavailable",
       environment,
+      brokerName: text(row, "broker_name", "server") || "HeroFX",
       available,
     }
   }).filter((row) => row.accountId && row.accountNumber)

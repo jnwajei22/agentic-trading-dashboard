@@ -4,7 +4,7 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: { default: "Agentic Trading Desk", template: "%s | Agentic Trading Desk" },
-  description: "Forex research, execution, and autonomous trading workspace",
+  description: "Market research, trade execution, and autonomous trading workspace",
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
