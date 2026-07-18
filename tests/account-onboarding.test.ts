@@ -25,8 +25,10 @@ test("account selection occurs only from an explicit click", () => {
 })
 
 test("shell renders every durable account and labels only the explicit default", () => {
-  const shell = readFileSync(join(process.cwd(), "components/desk/app-shell.tsx"), "utf8")
-  assert.match(shell, /accounts\.map/)
-  assert.match(shell, /account\.is_default_analysis \? ["'] · Default["']/)
-  assert.doesNotMatch(shell, /is_default_analysis\) \?\? accounts\[0\]/)
+  const provider = readFileSync(join(process.cwd(), "components/desk/account-provider.tsx"), "utf8")
+  const switcher = readFileSync(join(process.cwd(), "components/desk/account-switcher.tsx"), "utf8")
+  assert.match(switcher, /shown\.map/)
+  assert.match(switcher, /account\.is_default_analysis.*Primary/)
+  assert.match(provider, /normalizeAccountContext/)
+  assert.doesNotMatch(provider, /is_default_analysis\) \?\? accounts\[0\]/)
 })

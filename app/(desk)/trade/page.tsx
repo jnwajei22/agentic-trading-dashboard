@@ -1,9 +1,4 @@
-import { AlertTriangle } from "lucide-react"
-import { PageHeader,EmptyState } from "@/components/desk/page-header"
-import { Button } from "@/components/ui/button"
-import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { PageHeader } from "@/components/desk/page-header"
+import { TradeWorkspace } from "./workspace"
 export const metadata={title:"Trade"}
-export default function TradePage(){return <div className="space-y-7"><PageHeader eyebrow="Capability preview" title="Trade" description="Preview the future order workspace while authenticated execution contracts remain backend-owned."/><div className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"><AlertTriangle className="h-5 w-5"/><div><strong>Trade execution is unavailable.</strong><p className="text-muted-foreground">No browser fallback is used until authenticated preview and submission contracts are available.</p></div></div><div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]"><Card><CardHeader><CardTitle>Order ticket</CardTitle></CardHeader><CardContent className="space-y-4"><Field label="Symbol"/><div className="grid grid-cols-2 gap-3"><Button variant="outline" disabled>Buy</Button><Button variant="outline" disabled>Sell</Button></div><Field label="Quantity"/><Field label="Stop loss"/><Field label="Take profit"/><Button className="w-full" disabled>Preview order — unavailable</Button></CardContent></Card><div className="grid gap-5"><Card><CardHeader><CardTitle>Open positions</CardTitle></CardHeader><CardContent><EmptyState title="Position API not exposed" description="Positions appear when the backend adds the authenticated contract."/></CardContent></Card><Card><CardHeader><CardTitle>Recent orders</CardTitle></CardHeader><CardContent><EmptyState title="Unavailable" description="No canonical order-history endpoint exists."/></CardContent></Card></div></div></div>}
-function Field({label}:{label:string}){return <div><Label>{label}</Label><Input disabled placeholder="Unavailable"/></div>}
+export default function TradePage(){return <div className="space-y-7"><PageHeader eyebrow="Order workspace" title="Trade" description="Build and review an order safely. Submission remains disabled until authenticated backend trading REST contracts explicitly support it."/><TradeWorkspace/></div>}

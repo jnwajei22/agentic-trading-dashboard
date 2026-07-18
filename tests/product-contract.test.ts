@@ -12,7 +12,7 @@ test("customer enum formatting preserves approved acronyms",()=>{
 test("markets are provider-aggregated and TradeLocker is optional",()=>{
   const page=source("app/(desk)/markets/page.tsx");const workspace=source("app/(desk)/markets/workspace.tsx")
   for(const route of ["markets/overview","markets/news","markets/calendar","markets/macro"])assert.match(page,new RegExp(route))
-  assert.match(workspace,/TradingView/);assert.match(workspace,/Account tradability/)
+  assert.match(workspace,/TradingView/);assert.match(workspace,/Check tradability/)
 })
 test("dashboard hides worker identifiers behind automation status",()=>{
   const dashboard=source("app/(desk)/dashboard/page.tsx")

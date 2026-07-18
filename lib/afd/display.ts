@@ -1,12 +1,14 @@
 import type { Account } from "@/lib/afd/contracts"
 
-const ACRONYMS: Record<string, string> = { ai: "AI", api: "API", usd: "USD", utc: "UTC", id: "ID",
+const ACRONYMS: Record<string, string> = { ai: "AI", api: "API", usd: "USD", eur:"EUR",gbp:"GBP",jpy:"JPY",chf:"CHF",cad:"CAD",aud:"AUD",nzd:"NZD", utc: "UTC", id: "ID",ids:"IDs",
   pnl: "P&L", mcp: "MCP", rr: "R:R" }
 
 export function formatEnum(value: string | null | undefined) {
   if (!value) return "Unknown"
-  return value.split(/[_\-\s]+/).filter(Boolean).map((part) => ACRONYMS[part.toLowerCase()] ??
-    `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`).join(" ")
+  const parts=value.split(/[_\-\s/]+/).filter(Boolean)
+  if(parts.length===2&&parts.every(part=>["usd","eur","gbp","jpy","chf","cad","aud","nzd"].includes(part.toLowerCase())))return parts.map(part=>ACRONYMS[part.toLowerCase()]).join("/")
+  return parts.map((part,index) => ACRONYMS[part.toLowerCase()] ??
+    (index>0&&["to","and","or","of"].includes(part.toLowerCase())?part.toLowerCase():`${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)).join(" ")
 }
 
 export const accountTitle = (account: Account) => account.account_number || account.account_name || "Account"
