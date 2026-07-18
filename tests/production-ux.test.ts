@@ -30,7 +30,7 @@ test("global account context and command palette are shared customer controls", 
   const provider = source("components/desk/account-provider.tsx")
   const palette = source("components/desk/command-palette.tsx")
   assert.match(provider, /createContext|normalizeAccountContext/)
-  assert.match(provider, /broker\/accounts\/.*\/default/)
+  assert.match(provider, /trading\/accounts\/.*\/primary/)
   assert.match(palette, /event\.metaKey\|\|event\.ctrlKey/)
   assert.match(palette, /event\.key\.toLowerCase\(\)===\"k\"/)
   assert.match(palette, /window\.confirm/)
@@ -52,7 +52,7 @@ test("markets use durable watchlists and remain independent from trading account
   const workspace = source("app/(desk)/markets/workspace.tsx")
   assert.match(page, /watchlists/)
   assert.match(workspace, /Create watchlist|saveItems|pinned/)
-  assert.match(workspace, /TradingView visual context; not authoritative for execution/)
+  assert.match(workspace, /TradingView visual context; never authoritative for execution/)
   assert.doesNotMatch(workspace, /No TradeLocker account/)
 })
 

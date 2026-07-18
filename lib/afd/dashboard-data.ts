@@ -11,7 +11,7 @@ function failure(reason: unknown) { return reason && typeof reason === "object" 
 
 export async function loadDashboardData(request: DashboardRequest): Promise<DashboardData> {
   const calls = [
-    ["status", "/api/broker/status"], ["connections", "/api/broker/connections"], ["accounts", "/api/broker/accounts"],
+    ["status", "/api/broker/status"], ["connections", "/api/trading/connections"], ["accounts", "/api/trading/accounts"],
     ["profiles", "/api/execution-profiles"], ["runs", "/api/autonomous-runs"], ["executions", "/api/demo-executions"],
     ["schedules", "/api/autonomous-schedules"], ["worker", "/api/autonomous-worker-health"],
     ["daily", "/api/autonomous-daily-summary"], ["controls", "/api/autonomous-controls"],

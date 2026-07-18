@@ -10,7 +10,7 @@ export default async function DeskLayout({ children }: { children: React.ReactNo
   let accounts: Account[] = []; let status: BrokerStatus | null = null; let backendOnline = false
   try {
     const request = await authenticatedBackendClient()
-    const [accountResult, statusResult] = await Promise.allSettled([request<{ accounts: Account[] }>("/api/broker/accounts"), request<BrokerStatus>("/api/broker/status")])
+    const [accountResult, statusResult] = await Promise.allSettled([request<{ accounts: Account[] }>("/api/trading/accounts"), request<BrokerStatus>("/api/broker/status")])
     if (accountResult.status === "fulfilled") accounts = accountResult.value.accounts ?? []
     if (statusResult.status === "fulfilled") status = statusResult.value
     backendOnline = accountResult.status === "fulfilled" || statusResult.status === "fulfilled"

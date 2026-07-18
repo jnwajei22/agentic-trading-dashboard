@@ -39,7 +39,7 @@ Required variables:
 - `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, and a cryptographically random `AUTH0_SECRET`
 - `APP_BASE_URL`, normally `http://localhost:3000`
 - `AUTH0_AUDIENCE`, exactly matching the FastAPI `AUTH_AUDIENCE`
-- `NEXT_PUBLIC_API_BASE_URL`, the existing FastAPI origin (legacy name; server code is the only consumer)
+- `BACKEND_API_BASE_URL`, the FastAPI origin consumed only by Next.js server code. `NEXT_PUBLIC_API_BASE_URL` remains a deprecated compatibility fallback.
 
 Production backend URLs must be HTTPS, must not be localhost, and must not point back to the Vercel frontend. Never place Auth0 client secrets, TradeLocker credentials, encryption secrets, access tokens, or OpenAI keys in browser state or storage.
 
@@ -55,7 +55,13 @@ Repeat these entries with the stable production origin. Preview deployments need
 
 ## Vercel and backend deployment
 
-Import this repository as its own Vercel project and configure every `.env.example` value. Set `APP_BASE_URL` to the stable Vercel domain and `NEXT_PUBLIC_API_BASE_URL` to the public HTTPS FastAPI origin. A Raspberry Pi backend can remain private behind Cloudflare Tunnel; the tunnel origin is the backend URL, while the persistent autonomous worker continues running beside the backend. Vercel never starts or owns the scheduler worker.
+Import this repository as its own Vercel project and configure the small bootstrap set in `.env.example`. Set `APP_BASE_URL` to the stable Vercel domain and `BACKEND_API_BASE_URL` to the public HTTPS FastAPI origin. A Raspberry Pi backend can remain private behind Cloudflare Tunnel; the tunnel origin is the backend URL, while the persistent autonomous worker continues running beside the backend. Vercel never starts or owns the scheduler worker.
+
+## Provider boundaries
+
+The UI consumes normalized `/api/trading/*` and `/api/providers` contracts through the authenticated same-origin proxy. Broker, platform, execution, chart, signal, and market-data roles are displayed separately. TradingView is chart/signal infrastructure, not a broker, and its chart prices are never execution-authoritative. Robinhood Agentic remains visibly unconfigured until an official MCP/OAuth integration is implemented and tested. Users never enter deployment environment variables or platform API keys.
+
+Markets use canonical instrument IDs in URL and watchlist state. The backend maps each canonical ID independently for TradingView, Finnhub, and the selected execution provider; raw provider symbols are not interchangeable.
 
 The backend should allow the stable frontend origin where its deployment configuration requires it. Browser requests themselves remain same-origin to Vercel, and only the server proxy forwards bearer tokens.
 

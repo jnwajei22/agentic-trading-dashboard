@@ -5,7 +5,7 @@ import { loadDashboardData } from "../lib/afd/dashboard-data"
 test("dashboard normalizes real response wrappers and preserves partial success", async () => {
   const data = await loadDashboardData(async <T>(path: string) => {
     if (path.includes("worker-health")) throw Object.assign(new Error("offline"), { category: "timeout" })
-    if (path.endsWith("broker/accounts")) return { accounts: [{ public_id: "a1", account_alias: "demo", profiles: [] }] } as T
+    if (path.endsWith("trading/accounts")) return { accounts: [{ public_id: "a1", account_alias: "demo", profiles: [] }] } as T
     if (path.endsWith("execution-profiles")) return { profiles: [{ public_id: "p1", enabled: true }] } as T
     return {} as T
   })

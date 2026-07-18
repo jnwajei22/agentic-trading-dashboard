@@ -7,7 +7,7 @@ function host(value?: string) {
 }
 
 export function resolveBackendBaseUrl(env: RuntimeEnv = process.env) {
-  const configured = env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/$/, "")
+  const configured = (env.BACKEND_API_BASE_URL || env.NEXT_PUBLIC_API_BASE_URL)?.trim().replace(/\/$/, "")
   if (!configured) throw new Error("backend_url_not_configured")
   let target: URL
   try { target = new URL(configured) } catch { throw new Error("backend_url_invalid") }
