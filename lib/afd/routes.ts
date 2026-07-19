@@ -11,6 +11,7 @@ const exact: Record<string, readonly string[]> = {
   "user-preferences": ["GET", "PATCH"], "watchlists": ["GET", "POST"],
   "activity": ["GET"], "status": ["GET"],
   "providers": ["GET"], "trading/connections": ["GET"], "trading/accounts": ["GET"],
+  "trading/order-calculations": ["POST"],
 }
 const dynamic: Array<[RegExp, readonly string[]]> = [
   [/^broker\/accounts\/[^/]+\/(alias|default|disable|enable)$/, ["PUT"]],
