@@ -29,7 +29,46 @@ export default async function DashboardPage(){
     <OnboardingChecklist steps={steps}/>
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric icon={Waypoints} label="Primary account" value={selected?accountTitle(selected):"Not selected"} detail={selected?`${accountContext(selected)} · Default`:`${data.accounts.length} discovered · Trading blocked`}/><Metric icon={Bot} label="Enabled profiles" value={String(data.profiles.filter(p=>p.enabled).length)} detail={`${data.profiles.length} total`}/><Metric icon={ShieldAlert} label="Global kill switch" value={data.controls.global_autonomous_kill_switch?"Enabled":"Disabled"} detail={data.controls.global_autonomous_kill_switch?"New submissions blocked":"Backend confirmed off"}/><Metric icon={CalendarClock} label="Active schedules" value={String(active)} detail={`${data.schedules.length} configured`}/></section>
     <section className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]"><Card><CardHeader><CardTitle>Today&apos;s outcomes</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">{Object.entries(data.daily.outcomes).map(([key,count])=><div key={key} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{formatEnum(key)}</p><p className="text-2xl font-semibold">{count}</p></div>)}</CardContent></Card><Card><CardHeader><CardTitle>Automation Status</CardTitle></CardHeader><CardContent><StatusPill label={automation.state} tone={automation.state==="Ready"?"good":automation.state==="Paused"?"neutral":"warn"}/><p className="mt-4 text-sm text-muted-foreground">{automation.message}</p>{automation.state==="No Enabled Strategies"&&<Button asChild className="mt-4" size="sm"><Link href="/autonomous?create=1">Create Strategy</Link></Button>}{automation.state==="No Schedule"&&<Button asChild className="mt-4" size="sm"><Link href="/schedules?create=1">Create Schedule</Link></Button>}</CardContent></Card></section>
-    <section className="grid gap-5 xl:grid-cols-3"><ListCard title="Recent autonomous runs">{data.runs.slice(0,5).map(run=><Link href="/activity" key={run.run_id} className="flex justify-between rounded border p-3"><span><strong className="block text-sm">{formatEnum(run.outcome)}</strong><small>{run.chosen_instrument??"No instrument selected"}</small></span><small>{when(run.started_at)}</small></Link>)}{!data.runs.length&&<EmptyState title="No autonomous runs" description="Runs appear after a scheduled decision."/>}</ListCard><ListCard title="Recent demo executions">{data.executions.slice(0,5).map(item=><Link href="/activity" key={item.id} className="block rounded border p-3"><strong>{formatEnum(item.action_type??item.symbol??"Demo execution")}</strong><small className="block">{formatEnum(item.state??item.result)} · {when(item.created_at)}</small></Link>)}</ListCard><ListCard title="Upcoming schedules">{data.schedules.filter(s=>s.enabled).slice(0,5).map(s=><Link href="/schedules" key={s.id} className="flex justify-between rounded border p-3"><strong>{s.profile_ref}</strong><small>{when(s.next_run_at)}</small></Link>)}{!active&&<EmptyState title="No active schedules" description="Create a schedule for an execution profile."/>}</ListCard></section>
+    <section className="grid gap-5 xl:grid-cols-3"><ListCard title="Recent autonomous runs">{data.runs.slice(0,5).map(run=><Link href="/activity" key={run.run_id} className="flex justify-between rounded border p-3"><span><strong className="block text-sm">{formatEnum(run.outcome)}</strong><small>{run.chosen_instrument??"No instrument selected"}</small></span><small>{when(run.started_at)}</small></Link>)}{!data.runs.length&&<EmptyState title="No autonomous runs" description="Runs appear after a scheduled decision."/>}</ListCard><ListCard title="Upcoming schedules">
+  {data.schedules
+    .filter(schedule => schedule.enabled)
+    .slice(0, 5)
+    .map(schedule => {
+      const profile = data.profiles.find(
+        item => item.public_id === schedule.profile_ref
+      )
+
+      const rawProfileName = profile?.name?.trim()
+      const profileName =
+        rawProfileName &&
+        !rawProfileName.toLowerCase().startsWith("profile_")
+          ? rawProfileName
+          : "Execution profile"
+
+      return (
+        <Link
+          href="/schedules"
+          key={schedule.id}
+          className="block rounded border p-3"
+        >
+          <strong className="block truncate text-sm">
+            {profileName}
+          </strong>
+
+          <small className="mt-1 block text-muted-foreground">
+            {when(schedule.next_run_at)}
+          </small>
+        </Link>
+      )
+    })}
+
+  {!active && (
+    <EmptyState
+      title="No active schedules"
+      description="Create a schedule for an execution profile."
+    />
+  )}
+</ListCard></section>
   </div>
 }
 function Metric({icon:Icon,label,value,detail}:{icon:typeof Bot;label:string;value:string;detail:string}){return <Card><CardContent className="flex justify-between p-5"><div><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p><p className="text-xs text-muted-foreground">{detail}</p></div><Icon className="h-4 w-4"/></CardContent></Card>}
