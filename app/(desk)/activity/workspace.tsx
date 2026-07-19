@@ -1,89 +1,53 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import type { Account, ActivityEvent, ProfileSummary, RunAudit } from "@/lib/afd/contracts"
-import { accountTitle, formatEnum } from "@/lib/afd/display"
-import { browserAfdFetch } from "@/lib/afd/browser-client"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { StatusPill } from "@/components/desk/status-pill"
+import Link from "next/link"
+import {useEffect,useMemo,useState} from "react"
+import {CalendarClock,Download,Filter,PauseCircle,Search,ShieldAlert,ShieldCheck,TestTube2,TrendingUp,Unplug,Workflow,XCircle,type LucideIcon} from "lucide-react"
+import type {Account,ActivityEvent,ProfileSummary,RunAudit} from "@/lib/afd/contracts"
+import {formatEnum} from "@/lib/afd/display"
+import {browserAfdFetch} from "@/lib/afd/browser-client"
+import {eventExplanation,eventTitle,groupActivity,matchesActivitySearch} from "./activity-model"
+import {Button} from "@/components/ui/button"
+import {Card,CardContent} from "@/components/ui/card"
+import {Input} from "@/components/ui/input"
+import {Sheet,SheetContent,SheetDescription,SheetHeader,SheetTitle} from "@/components/ui/sheet"
+import {StatusPill} from "@/components/desk/status-pill"
+import {EmptyState,PageHeader} from "@/components/desk/page-header"
 
-const PAGE_SIZE = 25
+const PAGE_SIZE=25
+type FilterKey="account"|"profile"|"type"|"outcome"|"environment"|"from"|"to"
 
-export function ActivityWorkspace({ initialEvents, accounts, profiles }: {
-  initialEvents: ActivityEvent[]
-  accounts: Account[]
-  profiles: ProfileSummary[]
-}) {
-  const [account, setAccount] = useState("")
-  const [profile, setProfile] = useState("")
-  const [type, setType] = useState("")
-  const [outcome, setOutcome] = useState("")
-  const [environment, setEnvironment] = useState("")
-  const [from, setFrom] = useState("")
-  const [to, setTo] = useState("")
-  const [page, setPage] = useState(0)
-  const [audit, setAudit] = useState<RunAudit | null>(null)
-  const filtered = useMemo(() => initialEvents.filter((event) =>
-    (!account || event.account_alias === account) &&
-    (!profile || event.profile_id === profile) &&
-    (!type || event.event_type === type) &&
-    (!outcome || event.outcome === outcome) &&
-    (!environment || event.environment === environment) &&
-    (!from || event.occurred_at.slice(0, 10) >= from) &&
-    (!to || event.occurred_at.slice(0, 10) <= to)
-  ), [account, environment, from, initialEvents, outcome, profile, to, type])
-  const visible = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-  const types = [...new Set(initialEvents.map((event) => event.event_type))]
-  const outcomes = [...new Set(initialEvents.map((event) => event.outcome).filter(Boolean))] as string[]
+export function ActivityWorkspace({initialEvents,accounts,profiles,initialError=false}:{initialEvents:ActivityEvent[];accounts:Account[];profiles:ProfileSummary[];initialError?:boolean}){
+  const [events,setEvents]=useState(initialEvents);const [searchInput,setSearchInput]=useState("");const [search,setSearch]=useState("");const [filtersOpen,setFiltersOpen]=useState(false)
+  const [account,setAccount]=useState("");const [profile,setProfile]=useState("");const [type,setType]=useState("");const [outcome,setOutcome]=useState("");const [environment,setEnvironment]=useState("");const [from,setFrom]=useState("");const [to,setTo]=useState("");const [page,setPage]=useState(0)
+  const [selected,setSelected]=useState<ActivityEvent|null>(null);const [audit,setAudit]=useState<RunAudit|null>(null);const [detailsLoading,setDetailsLoading]=useState(false);const [loadError,setLoadError]=useState(initialError);const [loading,setLoading]=useState(false)
+  useEffect(()=>{const timer=setTimeout(()=>{setSearch(searchInput);setPage(0)},250);return()=>clearTimeout(timer)},[searchInput])
+  const accountsByAlias=useMemo(()=>new Map(accounts.map(item=>[item.account_alias,item])),[accounts])
+  const filtered=useMemo(()=>events.filter(event=>matchesActivitySearch(event,search)&&(!account||event.account_alias===account)&&(!profile||event.profile_id===profile)&&(!type||event.event_type===type)&&(!outcome||event.outcome===outcome)&&(!environment||event.environment===environment)&&(!from||event.occurred_at.slice(0,10)>=from)&&(!to||event.occurred_at.slice(0,10)<=to)),[account,environment,events,from,outcome,profile,search,to,type])
+  const visible=filtered.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);const groups=groupActivity(visible);const types=[...new Set(events.map(event=>event.event_type))];const outcomes=[...new Set(events.map(event=>event.outcome).filter(Boolean))] as string[]
+  const activeFilters:Array<{key:FilterKey;label:string}>=[account&&{key:"account" as const,label:`Account: ${accountsByAlias.get(account)?.account_number??"Selected"}`},profile&&{key:"profile" as const,label:`Strategy: ${profiles.find(item=>item.public_id===profile)?.name??"Selected"}`},type&&{key:"type" as const,label:`Type: ${formatEnum(type)}`},outcome&&{key:"outcome" as const,label:`Outcome: ${formatEnum(outcome)}`},environment&&{key:"environment" as const,label:formatEnum(environment)},from&&{key:"from" as const,label:`From: ${from}`},to&&{key:"to" as const,label:`To: ${to}`}].filter(Boolean) as Array<{key:FilterKey;label:string}>
+  function setFilter(key:FilterKey,value:string){({account:setAccount,profile:setProfile,type:setType,outcome:setOutcome,environment:setEnvironment,from:setFrom,to:setTo}[key])(value);setPage(0)}
+  function clearFilters(){setAccount("");setProfile("");setType("");setOutcome("");setEnvironment("");setFrom("");setTo("");setSearchInput("");setSearch("");setPage(0)}
+  async function inspect(event:ActivityEvent){setSelected(event);setAudit(null);if(!event.run_id)return;setDetailsLoading(true);try{setAudit(await browserAfdFetch<RunAudit>(`autonomous-runs/${event.run_id}/audit`))}finally{setDetailsLoading(false)}}
+  async function retry(){setLoading(true);try{const result=await browserAfdFetch<{events:ActivityEvent[]}>("activity");setEvents(result.events??[]);setLoadError(false)}catch{setLoadError(true)}finally{setLoading(false)}}
+  function csv(){const headers=["Timestamp","Account","Broker","Environment","Strategy","Event Type","Instrument","Outcome","Explanation","Blocking Reason","Execution Status"];const rows=filtered.map(event=>{const accountData=event.account_alias?accountsByAlias.get(event.account_alias):undefined;return [event.occurred_at,event.account_number??accountData?.account_number??"",accountData?.broker_name??"",event.environment??"",event.strategy_name??"",eventTitle(event),event.symbol??"",event.outcome??"",eventExplanation(event),(event.reason_codes??[]).map(formatEnum).join(" | "),event.dry_run?"Demo Test":""]});const escape=(value:string)=>`"${value.replaceAll('"','""')}"`;const blob=new Blob([[headers,...rows].map(row=>row.map(value=>escape(String(value))).join(",")).join("\n")],{type:"text/csv"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="agentic-trading-activity.csv";link.click();URL.revokeObjectURL(url)}
 
-  async function inspect(event: ActivityEvent) {
-    if (event.run_id) setAudit(await browserAfdFetch<RunAudit>(`autonomous-runs/${event.run_id}/audit`))
-  }
-
-  function csv() {
-    const headers = ["timestamp", "event_type", "account_number", "strategy", "environment", "outcome", "symbol", "reasons"]
-    const rows = filtered.map((event) => [event.occurred_at, event.event_type, event.account_number ?? "", event.strategy_name ?? "", event.environment ?? "", event.outcome ?? "", event.symbol ?? "", (event.reason_codes ?? []).join("|")])
-    const escape = (value: string) => `"${value.replaceAll('"', '""')}"`
-    const blob = new Blob([[headers, ...rows].map((row) => row.map((value) => escape(String(value))).join(",")).join("\n")], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = "agentic-trading-activity.csv"
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const resetPage = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(0) }
-  return <div className="space-y-5">
-    <Card><CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Choice label="Filter by account" value={account} onChange={resetPage(setAccount)} options={accounts.map((item) => [item.account_alias, accountTitle(item)])} empty="All accounts" />
-      <Choice label="Filter by strategy" value={profile} onChange={resetPage(setProfile)} options={profiles.map((item) => [item.public_id, item.name])} empty="All strategies" />
-      <Choice label="Filter by event type" value={type} onChange={resetPage(setType)} options={types.map((item) => [item, formatEnum(item)])} empty="All event types" />
-      <Choice label="Filter by outcome" value={outcome} onChange={resetPage(setOutcome)} options={outcomes.map((item) => [item, formatEnum(item)])} empty="All outcomes" />
-      <Choice label="Filter by environment" value={environment} onChange={resetPage(setEnvironment)} options={[["demo", "Demo"], ["live", "Live"]]} empty="Demo and Live" />
-      <Input type="date" value={from} onChange={(event) => resetPage(setFrom)(event.target.value)} aria-label="From date" />
-      <Input type="date" value={to} onChange={(event) => resetPage(setTo)(event.target.value)} aria-label="To date" />
-      <Button variant="outline" onClick={csv} disabled={!filtered.length}>Export CSV</Button>
+  return <div className="space-y-5"><PageHeader title="Activity" description="Review strategy decisions, trading activity, schedule changes, and safety events." actions={<Button variant="outline" onClick={csv} disabled={!filtered.length} title="Exports the currently filtered activity."><Download className="mr-2 h-4 w-4"/>Export CSV</Button>}/>
+    <Card><CardContent className="space-y-3 p-3"><div className="flex flex-col gap-2 sm:flex-row"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input value={searchInput} onChange={event=>setSearchInput(event.target.value)} placeholder="Search activity…" className="pl-9" aria-label="Search activity"/></div><Button type="button" variant={filtersOpen?"secondary":"outline"} aria-expanded={filtersOpen} onClick={()=>setFiltersOpen(value=>!value)}><Filter className="mr-2 h-4 w-4"/>Filters{activeFilters.length?` (${activeFilters.length})`:""}</Button></div>
+      {filtersOpen&&<div className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3 sm:flex-row sm:flex-wrap sm:items-end"><Choice label="Account" value={account} onChange={value=>setFilter("account",value)} options={accounts.map(item=>[item.account_alias,`${item.account_number??"Account number unavailable"} · ${item.broker_name??"Broker"} · ${formatEnum(item.environment)}`])} empty="All Accounts" className="sm:min-w-64"/><Choice label="Strategy" value={profile} onChange={value=>setFilter("profile",value)} options={profiles.map(item=>[item.public_id,item.name])} empty="All Strategies" className="sm:min-w-52"/><Choice label="Event Type" value={type} onChange={value=>setFilter("type",value)} options={types.map(item=>[item,formatEnum(item)])} empty="All Event Types"/><Choice label="Outcome" value={outcome} onChange={value=>setFilter("outcome",value)} options={outcomes.map(item=>[item,formatEnum(item)])} empty="All Outcomes" className="sm:max-w-44"/><Choice label="Environment" value={environment} onChange={value=>setFilter("environment",value)} options={[["demo","Demo"],["live","Live"]]} empty="All Environments" className="sm:max-w-44"/><div className="flex flex-col gap-1"><span className="text-xs text-muted-foreground">Date Range</span><div className="flex gap-2"><Input type="date" value={from} onChange={event=>setFilter("from",event.target.value)} aria-label="From date"/><Input type="date" value={to} onChange={event=>setFilter("to",event.target.value)} aria-label="To date"/></div></div><Button type="button" size="sm" variant="ghost" disabled={!activeFilters.length&&!search} onClick={clearFilters}>Clear Filters</Button></div>}
+      {activeFilters.length>0&&<div className="flex flex-wrap gap-2">{activeFilters.map(filter=><button type="button" key={filter.key} onClick={()=>setFilter(filter.key,"")} className="rounded-full border px-3 py-1 text-xs" aria-label={`Remove ${filter.label} filter`}>{filter.label} ×</button>)}</div>}
+      <p className="text-xs text-muted-foreground">Exports the currently filtered activity.</p>
     </CardContent></Card>
-    <div className="space-y-2">
-      {visible.map((event) => <button key={event.id} onClick={() => void inspect(event)} disabled={!event.run_id} className="flex w-full flex-col justify-between gap-2 rounded-lg border p-4 text-left hover:bg-accent disabled:opacity-100 sm:flex-row sm:items-center">
-        <span><strong>{formatEnum(event.event_type)}</strong><span className="mt-1 block text-xs text-muted-foreground">{event.strategy_name ?? event.account_number ?? "Workspace"}{event.symbol ? ` · ${event.symbol}` : ""} · <time title={event.occurred_at}>{new Date(event.occurred_at).toLocaleString()}</time></span>{event.reason_codes?.length ? <span className="mt-1 block text-xs">{event.reason_codes.map(formatEnum).join(", ")}</span> : null}</span>
-        <span className="flex gap-2">{event.dry_run && <StatusPill label="Demo Test" />}<StatusPill label={formatEnum(event.outcome)} /></span>
-      </button>)}
-      {!visible.length && <p className="rounded border border-dashed p-8 text-center text-sm text-muted-foreground">No activity matches these filters.</p>}
-    </div>
-    <div className="flex items-center justify-between"><Button variant="outline" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous</Button><span className="text-sm">Page {page + 1} · {filtered.length} events</span><Button variant="outline" disabled={(page + 1) * PAGE_SIZE >= filtered.length} onClick={() => setPage((value) => value + 1)}>Next</Button></div>
-    <Sheet open={Boolean(audit)} onOpenChange={(open) => !open && setAudit(null)}><SheetContent className="overflow-y-auto sm:max-w-xl"><SheetHeader><SheetTitle>Strategy evaluation</SheetTitle><SheetDescription>Structured audit fields only.</SheetDescription></SheetHeader>{audit && <div className="mt-5 space-y-3"><Datum label="Final action" value={formatEnum(audit.outcome)} /><Datum label="Markets checked" value={audit.selected_market_universe.join(", ") || "None"} /><Datum label="Candidates screened" value={String(audit.candidates_screened)} /><Datum label="Candidates analyzed" value={String(audit.candidates_deeply_analyzed)} /><Datum label="Selected instrument" value={audit.chosen_instrument ?? "None"} /><Datum label="Blocking reasons" value={audit.reason_codes.map(formatEnum).join(", ") || "None"} /></div>}</SheetContent></Sheet>
+    {loadError&&<div className="flex flex-wrap items-center justify-between gap-3 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm"><span>Activity could not be refreshed. Any visible results may be outdated.</span><Button size="sm" variant="outline" onClick={()=>void retry()}>Retry</Button></div>}
+    {loading?<ActivitySkeleton/>:visible.length?<div className="space-y-6">{groups.map(group=><section key={group.date}><h2 className="mb-2 text-sm font-semibold">{group.label}</h2><div className="divide-y rounded-lg border bg-card">{group.events.map(event=><ActivityRow key={event.id} event={event} account={event.account_alias?accountsByAlias.get(event.account_alias):undefined} onInspect={()=>void inspect(event)}/>)}</div></section>)}</div>:events.length===0&&!loadError?<EmptyState title="No activity yet" description="Strategy evaluations, schedule changes, safety actions, and demo trades will appear here." action={profiles.length?<div className="flex flex-wrap justify-center gap-2"><Button asChild><Link href="/autonomous">Run Demo Test</Link></Button><Button asChild variant="outline"><Link href="/schedules">Create Schedule</Link></Button></div>:undefined}/>:!loadError?<EmptyState title="No matching activity" description="Try changing or clearing the current filters." action={<Button variant="outline" onClick={clearFilters}>Clear Filters</Button>}/>:null}
+    {filtered.length>0&&<div className="flex flex-col items-center justify-between gap-2 sm:flex-row"><span className="text-sm text-muted-foreground">Showing {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE,filtered.length)} of {filtered.length} events</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page===0} onClick={()=>setPage(value=>value-1)}>Previous</Button><Button size="sm" variant="outline" disabled={(page+1)*PAGE_SIZE>=filtered.length} onClick={()=>setPage(value=>value+1)}>Next</Button></div></div>}
+    <DetailsSheet event={selected} account={selected?.account_alias?accountsByAlias.get(selected.account_alias):undefined} audit={audit} loading={detailsLoading} onClose={()=>{setSelected(null);setAudit(null)}}/>
   </div>
 }
 
-function Choice({ label, value, onChange, options, empty }: { label: string; value: string; onChange: (value: string) => void; options: string[][]; empty: string }) {
-  return <select value={value} onChange={(event) => onChange(event.target.value)} className="h-10 rounded border bg-background px-3" aria-label={label}><option value="">{empty}</option>{options.map(([raw, display]) => <option key={raw} value={raw}>{display}</option>)}</select>
-}
-
-function Datum({ label, value }: { label: string; value: string }) {
-  return <div className="rounded border p-3"><p className="text-xs text-muted-foreground">{label}</p><p>{value}</p></div>
-}
+function ActivityRow({event,account,onInspect}:{event:ActivityEvent;account?:Account;onInspect:()=>void}){const visual=eventVisual(event);const Icon=visual.icon;const accountNumber=event.account_number??account?.account_number;return <article className="grid gap-3 p-4 sm:grid-cols-[72px_1fr_auto]"><time className="text-sm font-medium" title={event.occurred_at}>{new Intl.DateTimeFormat(undefined,{hour:"numeric",minute:"2-digit"}).format(new Date(event.occurred_at))}</time><div className="min-w-0"><div className="flex items-center gap-2"><Icon className="h-4 w-4 shrink-0" aria-hidden="true"/><h3 className="font-semibold">{eventTitle(event)}</h3></div>{(event.strategy_name||accountNumber)&&<p className="mt-1 text-sm text-muted-foreground">{[event.strategy_name,accountNumber&&`Account ${accountNumber}`,account?.broker_name].filter(Boolean).join(" · ")}</p>}{event.symbol&&<p className="mt-1 text-sm font-medium">{event.symbol}</p>}<p className="mt-1 text-sm">{eventExplanation(event)}</p><Button type="button" variant="link" className="mt-1 h-auto p-0 text-xs" onClick={onInspect}>View Details</Button></div><div className="flex flex-wrap items-start gap-2">{event.environment&&<StatusPill label={formatEnum(event.environment)}/>} {event.outcome&&<StatusPill label={formatEnum(event.outcome)} tone={visual.tone}/>}</div></article>}
+function DetailsSheet({event,account,audit,loading,onClose}:{event:ActivityEvent|null;account?:Account;audit:RunAudit|null;loading:boolean;onClose:()=>void}){return <Sheet open={Boolean(event)} onOpenChange={open=>!open&&onClose()}><SheetContent className="overflow-y-auto sm:max-w-xl"><SheetHeader><SheetTitle>{event?eventTitle(event):"Activity Details"}</SheetTitle><SheetDescription>Structured activity details only.</SheetDescription></SheetHeader>{event&&<div className="mt-5 grid gap-3"><Datum label="Exact Timestamp" value={new Date(event.occurred_at).toLocaleString()}/>{(event.account_number||account?.account_number)&&<Datum label="Account" value={`${event.account_number??account?.account_number}${account?.broker_name?` · ${account.broker_name}`:""}`}/>} {event.strategy_name&&<Datum label="Strategy" value={event.strategy_name}/>} {event.symbol&&<Datum label="Instrument" value={event.symbol}/>} {event.confidence!=null&&<Datum label="Confidence" value={`${Math.round(event.confidence*100)}%`}/>} {event.outcome&&<Datum label="Outcome" value={formatEnum(event.outcome)}/>} {event.reason_codes?.length&&<Datum label="Blocking Reasons" value={event.reason_codes.map(formatEnum).join(", ")}/>} {event.environment&&<Datum label="Environment" value={formatEnum(event.environment)}/>} {loading&&<p className="text-sm text-muted-foreground">Loading evaluation details…</p>}{audit&&<><Datum label="Markets Checked" value={audit.selected_market_universe.join(", ")||"None"}/><Datum label="Candidates Screened" value={String(audit.candidates_screened)}/><Datum label="Candidates Analyzed" value={String(audit.candidates_deeply_analyzed)}/>{audit.chosen_instrument&&<Datum label="Selected Instrument" value={audit.chosen_instrument}/>} {audit.reason_codes.length>0&&<Datum label="Risk Checks" value={audit.reason_codes.map(formatEnum).join(", ")}/>}</>}</div>}</SheetContent></Sheet>}
+function ActivitySkeleton(){return <div aria-label="Loading activity" className="space-y-3">{[1,2,3].map(item=><div key={item} className="h-24 animate-pulse rounded-lg bg-muted"/>)}</div>}
+function Choice({label,value,onChange,options,empty,className=""}:{label:string;value:string;onChange:(value:string)=>void;options:string[][];empty:string;className?:string}){return <label className={`flex flex-col gap-1 ${className}`}><span className="text-xs text-muted-foreground">{label}</span><select value={value} onChange={event=>onChange(event.target.value)} className="h-10 rounded border bg-background px-3"><option value="">{empty}</option>{options.map(([raw,display])=><option key={raw} value={raw}>{display}</option>)}</select></label>}
+function Datum({label,value}:{label:string;value:string}){return <div className="rounded border p-3"><p className="text-xs text-muted-foreground">{label}</p><p>{value}</p></div>}
+function eventVisual(event:ActivityEvent):{icon:LucideIcon;tone:"good"|"warn"|"bad"|"neutral"}{const value=`${event.event_type} ${event.outcome}`.toLowerCase();if(value.includes("kill_switch_enabled")||value.includes("blocked"))return {icon:ShieldAlert,tone:"warn"};if(value.includes("reject")||value.includes("error")||value.includes("fail"))return {icon:XCircle,tone:"bad"};if(value.includes("submitted")||value.includes("success")||value.includes("trade"))return {icon:TrendingUp,tone:"good"};if(value.includes("schedule"))return {icon:CalendarClock,tone:"neutral"};if(value.includes("pause"))return {icon:PauseCircle,tone:"warn"};if(value.includes("connection"))return {icon:Unplug,tone:"neutral"};if(value.includes("kill_switch_disabled"))return {icon:ShieldCheck,tone:"good"};if(event.dry_run)return {icon:TestTube2,tone:"neutral"};return {icon:Workflow,tone:"neutral"}}

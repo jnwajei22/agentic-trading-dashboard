@@ -1,0 +1,11 @@
+import type {ActivityEvent} from "@/lib/afd/contracts"
+import {formatEnum} from "@/lib/afd/display"
+
+const titles:Record<string,string>={strategy_evaluated:"Strategy Evaluated",demo_order_submitted:"Demo Order Submitted",order_rejected:"Order Rejected",schedule_created:"Schedule Created",schedule_paused:"Schedule Paused",profile_updated:"Strategy Updated",trading_connection_added:"Trading Connection Added",kill_switch_enabled:"Kill Switch Enabled",kill_switch_disabled:"Kill Switch Disabled",safety_control_updated:"Safety Control Updated"}
+
+export function eventTitle(event:ActivityEvent){return titles[event.event_type]??formatEnum(event.event_type)}
+export function eventExplanation(event:ActivityEvent){const outcome=event.outcome?formatEnum(event.outcome):"";const reasons=(event.reason_codes??[]).map(formatEnum).join(", ");return [outcome,reasons].filter(Boolean).join(" — ")||"Activity recorded."}
+export function matchesActivitySearch(event:ActivityEvent,query:string){const search=query.trim().toLocaleLowerCase();if(!search)return true;return [event.symbol,event.strategy_name,event.account_number,eventTitle(event),event.outcome,...(event.reason_codes??[])].filter(Boolean).some(value=>String(value).toLocaleLowerCase().includes(search))}
+export function groupActivity(events:ActivityEvent[],now=new Date()){const ordered=[...events].sort((left,right)=>new Date(right.occurred_at).getTime()-new Date(left.occurred_at).getTime());return ordered.reduce<Array<{label:string;date:string;events:ActivityEvent[]}>>((groups,event)=>{const date=event.occurred_at.slice(0,10);let group=groups.at(-1);if(!group||group.date!==date){group={date,label:dateGroupLabel(date,now),events:[]};groups.push(group)}group.events.push(event);return groups},[])}
+export function dateGroupLabel(date:string,now=new Date()){const today=localDate(now);const yesterdayDate=new Date(now);yesterdayDate.setDate(yesterdayDate.getDate()-1);if(date===today)return "Today";if(date===localDate(yesterdayDate))return "Yesterday";return new Intl.DateTimeFormat(undefined,{dateStyle:"long",timeZone:"UTC"}).format(new Date(`${date}T12:00:00Z`))}
+function localDate(value:Date){const year=value.getFullYear();const month=String(value.getMonth()+1).padStart(2,"0");const day=String(value.getDate()).padStart(2,"0");return `${year}-${month}-${day}`}

@@ -74,7 +74,7 @@ test("demo tests, schedules, and activity expose structured non-executing UX", (
   assert.match(autonomous, /No order can be submitted/)
   assert.doesNotMatch(autonomous, /JSON\.stringify\(result\.validation/)
   assert.match(schedules, /next_run_times|readiness_warnings|market_aware/)
-  assert.match(activity, /Export CSV|Filter by account|occurred_at/)
+  assert.match(activity, /Export CSV|All Accounts|occurred_at/)
 })
 
 test("settings use trading terminology and confirm credential removal", () => {
