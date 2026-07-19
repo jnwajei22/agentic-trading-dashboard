@@ -7,7 +7,7 @@ const exact: Record<string, readonly string[]> = {
   "autonomous-runs": ["GET"], "autonomous-schedules": ["GET"], "autonomous-daily-summary": ["GET"],
   "autonomous-worker-health": ["GET"], "demo-executions": ["GET"], "operations/kill-switch/enable": ["POST"],
   "markets/overview": ["GET"], "markets/search": ["GET"], "markets/news": ["GET"],
-  "markets/calendar": ["GET"], "markets/macro": ["GET"],
+  "markets/calendar": ["GET"],
   "user-preferences": ["GET", "PATCH"], "watchlists": ["GET", "POST"],
   "activity": ["GET"], "status": ["GET"],
   "providers": ["GET"], "trading/connections": ["GET"], "trading/accounts": ["GET"],

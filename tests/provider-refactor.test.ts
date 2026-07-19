@@ -43,7 +43,7 @@ test("Markets selection is canonical interactive and race safe", () => {
 
 test("Markets updates dependent sections and never converts missing values to zero", () => {
   const workspace = source("app/(desk)/markets/workspace.tsx")
-  for (const path of ["/summary", "markets/news", "markets/calendar", "markets/macro", "/tradability/"]) assert.match(workspace, new RegExp(path.replaceAll("/", "\\/")))
+  for (const path of ["/summary", "markets/news", "markets/calendar", "/tradability/"]) assert.match(workspace, new RegExp(path.replaceAll("/", "\\/")))
   assert.match(workspace, /Promise\.allSettled/)
   assert.match(workspace, /Unavailable/)
   assert.doesNotMatch(workspace, /\?\?\s*0/)

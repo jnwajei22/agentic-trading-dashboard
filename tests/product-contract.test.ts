@@ -11,8 +11,20 @@ test("customer enum formatting preserves approved acronyms",()=>{
 })
 test("markets are provider-aggregated and TradeLocker is optional",()=>{
   const page=source("app/(desk)/markets/page.tsx");const workspace=source("app/(desk)/markets/workspace.tsx")
-  for(const route of ["markets/news","markets/calendar","markets/macro"])assert.match(page,new RegExp(route))
+  for(const route of ["markets/news","markets/calendar"])assert.match(page,new RegExp(route))
+  assert.doesNotMatch(page,/markets\/macro/)
   assert.match(workspace,/markets\/.*\/summary/);assert.match(workspace,/TradingView/);assert.match(workspace,/tradability/i)
+})
+test("FRED is consolidated into summary and the instrument-aware calendar",()=>{
+  const workspace=source("app/(desk)/markets/workspace.tsx")
+  assert.doesNotMatch(workspace,/Macro context|MacroData|markets\/macro/i)
+  assert.match(workspace,/summary\?\.drivers/)
+  assert.match(workspace,/Relevant to Selected Market/)
+  assert.match(workspace,/High Impact/)
+  assert.match(workspace,/All Events/)
+  assert.match(workspace,/associated_fred_series/)
+  assert.match(workspace,/Recent trend/)
+  assert.match(workspace,/Stale|Current/)
 })
 test("dashboard hides worker identifiers behind automation status",()=>{
   const dashboard=source("app/(desk)/dashboard/page.tsx")
