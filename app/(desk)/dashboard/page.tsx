@@ -1,75 +1,447 @@
 import Link from "next/link"
-import { AlertTriangle, Bot, CalendarClock, ShieldAlert, Waypoints } from "lucide-react"
+import {
+  AlertTriangle,
+  Bot,
+  CalendarClock,
+  ShieldAlert,
+  Waypoints,
+} from "lucide-react"
+
 import { authenticatedBackendClient } from "@/lib/afd/backend"
 import { loadDashboardData } from "@/lib/afd/dashboard-data"
-import { accountTitle, accountContext, formatEnum } from "@/lib/afd/display"
-import { PageHeader, EmptyState } from "@/components/desk/page-header"
-import { StatusPill } from "@/components/desk/status-pill"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { OnboardingChecklist } from "@/components/desk/onboarding-checklist"
+import {
+  accountContext,
+  accountTitle,
+  formatEnum,
+} from "@/lib/afd/display"
 import { automationStatus } from "@/lib/afd/automation"
 
+import { EmptyState, PageHeader } from "@/components/desk/page-header"
+import { OnboardingChecklist } from "@/components/desk/onboarding-checklist"
+import { StatusPill } from "@/components/desk/status-pill"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+
 export const metadata = { title: "Dashboard" }
-const when=(value?:string)=>value?new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(value)):"Not recorded"
-export default async function DashboardPage(){
-  let data;try{data=await loadDashboardData(await authenticatedBackendClient())}catch{data=await loadDashboardData(async()=>{throw new Error("unavailable")})}
-  const selected=data.accounts.find(a=>a.is_default_analysis);const active=data.schedules.filter(s=>s.enabled).length;const setup=!data.connections.length||data.status?.status!=="ready"
-  const automation=automationStatus(data);const steps=[
-    {label:"Add a trading connection",href:"/connect-tradelocker?new=1",complete:data.connections.some(item=>item.enabled)},
-    {label:"Select a trading account",href:"/settings/accounts",complete:Boolean(selected)},
-    {label:"Create a strategy",href:"/autonomous?create=1",complete:data.profiles.length>0},
-    {label:"Configure risk",href:data.profiles[0]?`/autonomous/${data.profiles[0].public_id}`:"/autonomous",complete:data.profiles.some(profile=>Boolean(profile.profile_v2?.risk_policy))},
-    {label:"Create a schedule",href:"/schedules?create=1",complete:data.schedules.length>0},
-    {label:"Run a demo test",href:"/autonomous",complete:data.runs.some(run=>run.dry_run||run.trigger_reason==="demo_test")},
+
+const when = (value?: string) =>
+  value
+    ? new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(value))
+    : "Not recorded"
+
+export default async function DashboardPage() {
+  let data
+
+  try {
+    data = await loadDashboardData(await authenticatedBackendClient())
+  } catch {
+    data = await loadDashboardData(async () => {
+      throw new Error("unavailable")
+    })
+  }
+
+  const selected = data.accounts.find(
+    account => account.is_default_analysis
+  )
+
+  const active = data.schedules.filter(
+    schedule => schedule.enabled
+  ).length
+
+  const setup =
+    !data.connections.length || data.status?.status !== "ready"
+
+  const automation = automationStatus(data)
+
+  const steps = [
+    {
+      label: "Add a trading connection",
+      href: "/connect-tradelocker?new=1",
+      complete: data.connections.some(connection => connection.enabled),
+    },
+    {
+      label: "Select a trading account",
+      href: "/settings/accounts",
+      complete: Boolean(selected),
+    },
+    {
+      label: "Create a strategy",
+      href: "/autonomous?create=1",
+      complete: data.profiles.length > 0,
+    },
+    {
+      label: "Configure risk",
+      href: data.profiles[0]
+        ? `/autonomous/${data.profiles[0].public_id}`
+        : "/autonomous",
+      complete: data.profiles.some(profile =>
+        Boolean(profile.profile_v2?.risk_policy)
+      ),
+    },
+    {
+      label: "Create a schedule",
+      href: "/schedules?create=1",
+      complete: data.schedules.length > 0,
+    },
+    {
+      label: "Run a demo test",
+      href: "/autonomous",
+      complete: data.runs.some(
+        run =>
+          run.dry_run ||
+          run.trigger_reason === "demo_test"
+      ),
+    },
   ]
-  return <div className="space-y-7"><PageHeader eyebrow="Operations desk" title="Trading command center" description="Broker accounts, profiles, schedules, and autonomous safety state." actions={<StatusPill label={data.coreUnavailable?"Backend degraded":"Backend connected"} tone={data.coreUnavailable?"bad":"good"}/>}/>
-    {Object.keys(data.errors).length>0&&<div role="status" className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"><AlertTriangle className="h-5 w-5 shrink-0"/><div><strong>Some operational data is unavailable.</strong><p className="text-muted-foreground">Loaded sections are preserved; unavailable actions remain blocked.</p></div></div>}
-    {setup&&!data.coreUnavailable&&<div className="flex flex-col justify-between gap-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 sm:flex-row sm:items-center"><div><strong>Trading setup required</strong><p className="text-sm text-muted-foreground">Add a trading connection and explicitly select a primary account.</p></div><Button asChild><Link prefetch={false} href={data.connections.length?"/select-account":"/connect-tradelocker"}>{data.connections.length?"Select account":"Add Trading Connection"}</Link></Button></div>}
-    <OnboardingChecklist steps={steps}/>
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric icon={Waypoints} label="Primary account" value={selected?accountTitle(selected):"Not selected"} detail={selected?`${accountContext(selected)} · Default`:`${data.accounts.length} discovered · Trading blocked`}/><Metric icon={Bot} label="Enabled profiles" value={String(data.profiles.filter(p=>p.enabled).length)} detail={`${data.profiles.length} total`}/><Metric icon={ShieldAlert} label="Global kill switch" value={data.controls.global_autonomous_kill_switch?"Enabled":"Disabled"} detail={data.controls.global_autonomous_kill_switch?"New submissions blocked":"Backend confirmed off"}/><Metric icon={CalendarClock} label="Active schedules" value={String(active)} detail={`${data.schedules.length} configured`}/></section>
-    <section className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]"><Card><CardHeader><CardTitle>Today&apos;s outcomes</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">{Object.entries(data.daily.outcomes).map(([key,count])=><div key={key} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{formatEnum(key)}</p><p className="text-2xl font-semibold">{count}</p></div>)}</CardContent></Card><Card><CardHeader><CardTitle>Automation Status</CardTitle></CardHeader><CardContent><StatusPill label={automation.state} tone={automation.state==="Ready"?"good":automation.state==="Paused"?"neutral":"warn"}/><p className="mt-4 text-sm text-muted-foreground">{automation.message}</p>{automation.state==="No Enabled Strategies"&&<Button asChild className="mt-4" size="sm"><Link href="/autonomous?create=1">Create Strategy</Link></Button>}{automation.state==="No Schedule"&&<Button asChild className="mt-4" size="sm"><Link href="/schedules?create=1">Create Schedule</Link></Button>}</CardContent></Card></section>
-    <section className="grid gap-5 xl:grid-cols-3"><ListCard title="Recent autonomous runs">{data.runs.slice(0,5).map(run=><Link href="/activity" key={run.run_id} className="flex justify-between rounded border p-3"><span><strong className="block text-sm">{formatEnum(run.outcome)}</strong><small>{run.chosen_instrument??"No instrument selected"}</small></span><small>{when(run.started_at)}</small></Link>)}{!data.runs.length&&<EmptyState title="No autonomous runs" description="Runs appear after a scheduled decision."/>}</ListCard><ListCard title="Upcoming schedules">
-  {data.schedules
-    .filter(schedule => schedule.enabled)
-    .slice(0, 5)
-    .map(schedule => {
-      const profile = data.profiles.find(
-        item => item.public_id === schedule.profile_ref
-      )
 
-      const rawProfileName = profile?.name?.trim()
-      const profileName =
-        rawProfileName &&
-        !rawProfileName.toLowerCase().startsWith("profile_")
-          ? rawProfileName
-          : "Execution profile"
+  return (
+    <div className="space-y-7">
+      <PageHeader
+        eyebrow="Operations desk"
+        title="Trading command center"
+        description="Broker accounts, profiles, schedules, and autonomous safety state."
+        actions={
+          <StatusPill
+            label={
+              data.coreUnavailable
+                ? "Backend degraded"
+                : "Backend connected"
+            }
+            tone={data.coreUnavailable ? "bad" : "good"}
+          />
+        }
+      />
 
-      return (
-        <Link
-          href="/schedules"
-          key={schedule.id}
-          className="block rounded border p-3"
+      {Object.keys(data.errors).length > 0 && (
+        <div
+          role="status"
+          className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
         >
-          <strong className="block truncate text-sm">
-            {profileName}
-          </strong>
+          <AlertTriangle className="h-5 w-5 shrink-0" />
 
-          <small className="mt-1 block text-muted-foreground">
-            {when(schedule.next_run_at)}
-          </small>
-        </Link>
-      )
-    })}
+          <div>
+            <strong>Some operational data is unavailable.</strong>
 
-  {!active && (
-    <EmptyState
-      title="No active schedules"
-      description="Create a schedule for an execution profile."
-    />
-  )}
-</ListCard></section>
-  </div>
+            <p className="text-muted-foreground">
+              Loaded sections are preserved; unavailable actions remain
+              blocked.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {setup && !data.coreUnavailable && (
+        <div className="flex flex-col justify-between gap-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 sm:flex-row sm:items-center">
+          <div>
+            <strong>Trading setup required</strong>
+
+            <p className="text-sm text-muted-foreground">
+              Add a trading connection and explicitly select a primary
+              account.
+            </p>
+          </div>
+
+          <Button asChild>
+            <Link
+              prefetch={false}
+              href={
+                data.connections.length
+                  ? "/select-account"
+                  : "/connect-tradelocker"
+              }
+            >
+              {data.connections.length
+                ? "Select account"
+                : "Add Trading Connection"}
+            </Link>
+          </Button>
+        </div>
+      )}
+
+      <OnboardingChecklist steps={steps} />
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric
+          icon={Waypoints}
+          label="Primary account"
+          value={selected ? accountTitle(selected) : "Not selected"}
+          detail={
+            selected
+              ? `${accountContext(selected)} · Default`
+              : `${data.accounts.length} discovered · Trading blocked`
+          }
+        />
+
+        <Metric
+          icon={Bot}
+          label="Enabled profiles"
+          value={String(
+            data.profiles.filter(profile => profile.enabled).length
+          )}
+          detail={`${data.profiles.length} total`}
+        />
+
+        <Metric
+          icon={ShieldAlert}
+          label="Global kill switch"
+          value={
+            data.controls.global_autonomous_kill_switch
+              ? "Enabled"
+              : "Disabled"
+          }
+          detail={
+            data.controls.global_autonomous_kill_switch
+              ? "New submissions blocked"
+              : "Backend confirmed off"
+          }
+        />
+
+        <Metric
+          icon={CalendarClock}
+          label="Active schedules"
+          value={String(active)}
+          detail={`${data.schedules.length} configured`}
+        />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Today&apos;s outcomes</CardTitle>
+          </CardHeader>
+
+          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {Object.entries(data.daily.outcomes).map(([key, count]) => (
+              <div
+                key={key}
+                className="rounded-lg border p-3"
+              >
+                <p className="text-xs text-muted-foreground">
+                  {formatEnum(key)}
+                </p>
+
+                <p className="text-2xl font-semibold">
+                  {count}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Automation Status</CardTitle>
+          </CardHeader>
+
+          <CardContent>
+            <StatusPill
+              label={automation.state}
+              tone={
+                automation.state === "Ready"
+                  ? "good"
+                  : automation.state === "Paused"
+                    ? "neutral"
+                    : "warn"
+              }
+            />
+
+            <p className="mt-4 text-sm text-muted-foreground">
+              {automation.message}
+            </p>
+
+            {automation.state === "No Enabled Strategies" && (
+              <Button
+                asChild
+                className="mt-4"
+                size="sm"
+              >
+                <Link href="/autonomous?create=1">
+                  Create Strategy
+                </Link>
+              </Button>
+            )}
+
+            {automation.state === "No Schedule" && (
+              <Button
+                asChild
+                className="mt-4"
+                size="sm"
+              >
+                <Link href="/schedules?create=1">
+                  Create Schedule
+                </Link>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-3">
+        <ListCard title="Recent autonomous runs">
+          {data.runs.slice(0, 5).map(run => (
+            <Link
+              href="/activity"
+              key={run.run_id}
+              className="flex justify-between gap-4 rounded border p-3"
+            >
+              <span className="min-w-0">
+                <strong className="block text-sm">
+                  {formatEnum(run.outcome)}
+                </strong>
+
+                <small className="block truncate">
+                  {run.chosen_instrument ?? "No instrument selected"}
+                </small>
+              </span>
+
+              <small className="shrink-0 text-right text-muted-foreground">
+                {when(run.started_at)}
+              </small>
+            </Link>
+          ))}
+
+          {!data.runs.length && (
+            <EmptyState
+              title="No autonomous runs"
+              description="Runs appear after a scheduled decision."
+            />
+          )}
+        </ListCard>
+
+        <ListCard title="Recent demo executions">
+          {data.executions.slice(0, 5).map(item => (
+            <Link
+              href="/activity"
+              key={item.id}
+              className="block rounded border p-3"
+            >
+              <strong className="block truncate text-sm">
+                {formatEnum(
+                  item.action_type ??
+                    item.symbol ??
+                    "Demo execution"
+                )}
+              </strong>
+
+              <small className="mt-1 block text-muted-foreground">
+                {formatEnum(item.state ?? item.result)} ·{" "}
+                {when(item.created_at)}
+              </small>
+            </Link>
+          ))}
+
+          {!data.executions.length && (
+            <EmptyState
+              title="No demo executions"
+              description="Demo executions appear after a successful demo test."
+            />
+          )}
+        </ListCard>
+
+        <ListCard title="Upcoming schedules">
+          {data.schedules
+            .filter(schedule => schedule.enabled)
+            .slice(0, 5)
+            .map(schedule => {
+              const profile = data.profiles.find(
+                item => item.public_id === schedule.profile_ref
+              )
+
+              const rawProfileName = profile?.name?.trim()
+
+              const profileName =
+                rawProfileName &&
+                !rawProfileName.toLowerCase().startsWith("profile_")
+                  ? rawProfileName
+                  : "Execution profile"
+
+              return (
+                <Link
+                  href="/schedules"
+                  key={schedule.id}
+                  className="block rounded border p-3"
+                >
+                  <strong className="block truncate text-sm">
+                    {profileName}
+                  </strong>
+
+                  <small className="mt-1 block text-muted-foreground">
+                    {when(schedule.next_run_at)}
+                  </small>
+                </Link>
+              )
+            })}
+
+          {!active && (
+            <EmptyState
+              title="No active schedules"
+              description="Create a schedule for an execution profile."
+            />
+          )}
+        </ListCard>
+      </section>
+    </div>
+  )
 }
-function Metric({icon:Icon,label,value,detail}:{icon:typeof Bot;label:string;value:string;detail:string}){return <Card><CardContent className="flex justify-between p-5"><div><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p><p className="text-xs text-muted-foreground">{detail}</p></div><Icon className="h-4 w-4"/></CardContent></Card>}
-function ListCard({title,children}:{title:string;children:React.ReactNode}){return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="space-y-3">{children}</CardContent></Card>}
+
+function Metric({
+  icon: Icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: typeof Bot
+  label: string
+  value: string
+  detail: string
+}) {
+  return (
+    <Card>
+      <CardContent className="flex justify-between p-5">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {label}
+          </p>
+
+          <p className="mt-2 text-xl font-semibold">
+            {value}
+          </p>
+
+          <p className="text-xs text-muted-foreground">
+            {detail}
+          </p>
+        </div>
+
+        <Icon className="h-4 w-4" />
+      </CardContent>
+    </Card>
+  )
+}
+
+function ListCard({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {children}
+      </CardContent>
+    </Card>
+  )
+}
