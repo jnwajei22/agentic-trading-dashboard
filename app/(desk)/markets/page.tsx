@@ -20,5 +20,5 @@ export default async function MarketsPage({ searchParams }: { searchParams: Prom
     if (c.status === "fulfilled") calendar = c.value
     if (w.status === "fulfilled") watchlists = w.value.watchlists ?? []
   } catch { /* independent client sections preserve partial content */ }
-  return <div className="space-y-7"><PageHeader eyebrow="Market research" title="Markets workspace" description="Canonical instruments mapped independently to TradingView, Finnhub, and execution providers." /><MarketsWorkspace accounts={accounts} initialWatchlists={watchlists} initialInstrument={initialInstrument} initialNews={news} initialCalendar={calendar} /></div>
+  return <div className="space-y-7"><PageHeader eyebrow="Markets" title="Market Research" description="Canonical instruments mapped independently to TradingView, Finnhub, and execution providers." /><MarketsWorkspace accounts={accounts} initialWatchlists={watchlists} initialInstrument={initialInstrument} initialNews={news} initialCalendar={calendar} /></div>
 }

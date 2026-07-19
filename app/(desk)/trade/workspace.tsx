@@ -1,7 +1,7 @@
 "use client"
 import { useEffect,useMemo,useRef,useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { AlertTriangle,Check,Minus,Plus } from "lucide-react"
+import { AlertTriangle,Check,Minus,Plus,Search,X } from "lucide-react"
 import { useAccountContext } from "@/components/desk/account-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,7 @@ import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs,TabsContent,TabsList,TabsTrigger } from "@/components/ui/tabs"
-import { browserAfdFetch } from "@/lib/afd/browser-client"
+import { BrowserAfdError,browserAfdFetch } from "@/lib/afd/browser-client"
 import { activeCalculation,entryForSide,previewExpired,protectionMessage,stepQuantity,type Side,type TargetMode,type ProtectionMode } from "./ticket-model"
 
 const stages=["Build Order","Review","Confirm","Submitted","Reconciled"]
@@ -23,13 +23,20 @@ type Calculation={
   capabilities:{calculation:boolean;preview:boolean;submission:boolean}
 }
 type Preview={calculation:Calculation;expires_at:string;preview_id:string}
+type Instrument={canonical_id:string;display_symbol:string;description:string;asset_class:string;exchange?:string|null}
+type SearchData={results:Instrument[]}
 type Ticket={accountId:string;instrument:string;side:Side;orderType:"market"|"limit"|"stop";quantity:number;stopLoss:Protection;takeProfit:Target;calculation:Calculation|null;preview:Preview|null}
 
 export function TradeWorkspace(){
   const {selected}=useAccountContext();const params=useSearchParams();const initial=params.get("instrument")||"forex:GBP/USD";const sequence=useRef(0)
   const [ticket,setTicket]=useState<Ticket>({accountId:selected?.publicRef??"",instrument:initial,side:"buy",orderType:"market",quantity:.5,stopLoss:{mode:"price",value:""},takeProfit:{mode:"price",value:""},calculation:null,preview:null})
-  const [loading,setLoading]=useState(false);const [error,setError]=useState("");const live=selected?.environment==="live"
+  const [loading,setLoading]=useState(false);const [error,setError]=useState("");const [symbolQuery,setSymbolQuery]=useState(initial.split(":").at(-1)??initial);const [symbolResults,setSymbolResults]=useState<Instrument[]>([]);const [symbolSearching,setSymbolSearching]=useState(false);const [symbolSearched,setSymbolSearched]=useState(false);const live=selected?.environment==="live"
   useEffect(()=>{setTicket(current=>({...current,accountId:selected?.publicRef??"",calculation:null,preview:null}))},[selected?.publicRef])
+  useEffect(()=>{
+    const query=symbolQuery.trim();if(!query){setSymbolResults([]);setSymbolSearched(false);return}
+    const controller=new AbortController();const timer=setTimeout(async()=>{setSymbolSearching(true);try{const data=await browserAfdFetch<SearchData>(`markets/search?q=${encodeURIComponent(query)}`,{signal:controller.signal});setSymbolResults(data.results??[]);setSymbolSearched(true)}catch{if(!controller.signal.aborted){setSymbolResults([]);setSymbolSearched(true)}}finally{if(!controller.signal.aborted)setSymbolSearching(false)}},250)
+    return()=>{clearTimeout(timer);controller.abort()}
+  },[symbolQuery])
   const payload=useMemo(()=>({account_id:ticket.accountId,instrument_id:ticket.instrument,side:ticket.side,order_type:ticket.orderType,
     quantity:{value:ticket.quantity,unit:"lot"},stop_loss:ticket.stopLoss.value?{mode:ticket.stopLoss.mode,value:Number(ticket.stopLoss.value)}:null,
     take_profit:ticket.takeProfit.value?{mode:ticket.takeProfit.mode,value:Number(ticket.takeProfit.value)}:null}),[ticket.accountId,ticket.instrument,ticket.side,ticket.orderType,ticket.quantity,ticket.stopLoss,ticket.takeProfit])
@@ -38,11 +45,12 @@ export function TradeWorkspace(){
     const controller=new AbortController();const current=++sequence.current;let timer:ReturnType<typeof setTimeout>;let stopped=false
     const run=async()=>{if(stopped)return;if(document.hidden){timer=setTimeout(run,15000);return}setLoading(true)
       try{const result=await browserAfdFetch<Calculation>("trading/order-calculations",{method:"POST",body:JSON.stringify(payload),signal:controller.signal});if(current===sequence.current)setTicket(value=>value.preview?value:{...value,calculation:result}) ;if(current===sequence.current)setError("")}
-      catch(cause){if(!controller.signal.aborted&&current===sequence.current)setError(cause instanceof Error?cause.message:"Order calculations are unavailable.")}
+      catch(cause){if(!controller.signal.aborted&&current===sequence.current)setError(cause instanceof BrowserAfdError&&cause.status===404?"Order calculations are not available for this account or instrument.":cause instanceof Error?cause.message:"Order calculations are unavailable.")}
       finally{if(current===sequence.current)setLoading(false);if(!stopped)timer=setTimeout(run,5000)}}
     timer=setTimeout(run,350);return()=>{stopped=true;clearTimeout(timer);controller.abort()}
   },[payload,ticket.preview])
   const update=(change:Partial<Ticket>)=>setTicket(current=>({...current,...change,preview:null}))
+  const chooseInstrument=(instrument:Instrument)=>{update({instrument:instrument.canonical_id,calculation:null});setSymbolQuery(instrument.display_symbol);setSymbolResults([]);setSymbolSearched(false)}
   const calculation=activeCalculation(ticket.calculation,ticket.preview);const entry=entryForSide(ticket.side,calculation?.quote??null)
   const localStop=ticket.stopLoss.mode==="price"&&ticket.stopLoss.value?Number(ticket.stopLoss.value):calculation?.stop_loss?.price??null
   const localTarget=ticket.takeProfit.mode==="price"&&ticket.takeProfit.value?Number(ticket.takeProfit.value):calculation?.take_profit?.price??null
@@ -50,7 +58,7 @@ export function TradeWorkspace(){
   const unit=calculation?.quantity.unit==="lot"?"Lots":"Contracts";const step=calculation?.quantity.step??.01;const minimum=calculation?.quantity.minimum??.01
   const expired=previewExpired(ticket.preview)
   return <div className="space-y-5"><CapabilityNotice live={live} calculation={calculation} error={error}/><ol className="grid grid-cols-5 gap-2 text-center text-xs">{stages.map((stage,index)=><li className={`rounded border p-2 ${index===0?"bg-accent font-semibold":"text-muted-foreground"}`} key={stage}>{stage}</li>)}</ol><Tabs defaultValue="ticket"><TabsList className="grid w-full grid-cols-4"><TabsTrigger value="ticket">Order Ticket</TabsTrigger><TabsTrigger value="positions">Open Positions</TabsTrigger><TabsTrigger value="pending">Pending Orders</TabsTrigger><TabsTrigger value="history">Order History</TabsTrigger></TabsList><TabsContent value="ticket"><div className="grid gap-5 xl:grid-cols-[1fr_.8fr]"><Card><CardHeader><CardTitle>Build Order</CardTitle></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2">
-    <div><Label htmlFor="trade-symbol">Symbol</Label><Input id="trade-symbol" value={ticket.instrument} onChange={event=>update({instrument:event.target.value,calculation:null})}/></div>
+    <div><Label htmlFor="trade-symbol">Symbol</Label><div className="relative mt-1"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input id="trade-symbol" value={symbolQuery} onChange={event=>setSymbolQuery(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&symbolResults[0]){event.preventDefault();chooseInstrument(symbolResults[0])}if(event.key==="Escape")setSymbolResults([])}} placeholder="Search symbols or descriptions" className="pl-9 pr-9" role="combobox" aria-expanded={Boolean(symbolResults.length)} aria-controls="trade-symbol-results"/>{symbolQuery&&<button type="button" onClick={()=>{setSymbolQuery("");setSymbolResults([])}} aria-label="Clear symbol search" className="absolute right-3 top-3"><X className="h-4 w-4"/></button>}{(symbolSearching||symbolResults.length>0||symbolSearched)&&<div id="trade-symbol-results" role="listbox" className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded border bg-popover shadow-lg">{symbolSearching?<p className="p-3 text-sm">Searching…</p>:symbolResults.map(instrument=><button type="button" role="option" key={instrument.canonical_id} className="block w-full border-b p-3 text-left hover:bg-accent" onClick={()=>chooseInstrument(instrument)}><strong>{instrument.display_symbol}</strong><span className="block text-xs text-muted-foreground">{instrument.description} · {instrument.asset_class}{instrument.exchange?` · ${instrument.exchange}`:""}</span></button>)}{symbolSearched&&!symbolResults.length&&<p className="p-3 text-sm text-muted-foreground">No matching instruments.</p>}</div>}</div><p className="mt-1 text-xs text-muted-foreground">Selected: {ticket.instrument}</p></div>
     <div><Label>Side</Label><div className="grid grid-cols-2 gap-2" role="group" aria-label="Order side">{(["buy","sell"] as Side[]).map(side=><Button key={side} type="button" variant={ticket.side===side?"default":"outline"} aria-pressed={ticket.side===side} onClick={()=>update({side,calculation:null})}>{ticket.side===side&&<Check aria-hidden="true"/>}{side==="buy"?"Buy":"Sell"}{ticket.side===side&&<span className="sr-only"> selected</span>}</Button>)}</div></div>
     <div><Label htmlFor="order-type">Order type</Label><select id="order-type" className="h-10 w-full rounded border bg-background px-3" value={ticket.orderType} onChange={event=>update({orderType:event.target.value as Ticket["orderType"],calculation:null})}><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select></div>
     <div><Label htmlFor="quantity">Quantity</Label><div className="flex items-center gap-2"><Button type="button" size="icon" variant="outline" aria-label="Decrease quantity" onClick={()=>update({quantity:stepQuantity(ticket.quantity,-1,step,minimum,calculation?.quantity.maximum),calculation:null})}><Minus/></Button><Input id="quantity" inputMode="decimal" type="number" min={minimum} max={calculation?.quantity.maximum??undefined} step={step} value={ticket.quantity} onChange={event=>update({quantity:Number(event.target.value),calculation:null})}/><Button type="button" size="icon" variant="outline" aria-label="Increase quantity" onClick={()=>update({quantity:stepQuantity(ticket.quantity,1,step,minimum,calculation?.quantity.maximum),calculation:null})}><Plus/></Button><span className="text-sm font-medium">{unit}</span></div><QuantityContext calculation={calculation}/></div>

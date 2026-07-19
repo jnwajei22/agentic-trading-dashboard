@@ -1,12 +1,11 @@
 "use client"
 /* eslint-disable jsx-a11y/role-has-required-aria-props -- selection is represented by URL state and focus */
 
-import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowDown, ArrowUp, Pin, Plus, Search, X } from "lucide-react"
 import type { Account, CanonicalInstrument, MarketSummary, Watchlist } from "@/lib/afd/contracts"
-import { accountLabel, formatEnum } from "@/lib/afd/display"
+import { formatEnum } from "@/lib/afd/display"
 import { browserAfdFetch, mutateAfd } from "@/lib/afd/browser-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,31 +34,27 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
   const [news, setNews] = useState(initialNews); const [calendar, setCalendar] = useState(initialCalendar)
   const [calendarFilter, setCalendarFilter] = useState<"relevant"|"high"|"all">("relevant"); const [expandedEvent, setExpandedEvent] = useState<string | null>(null)
   const [query, setQuery] = useState(""); const [results, setResults] = useState<CanonicalInstrument[]>([]); const [searching, setSearching] = useState(false); const [searched, setSearched] = useState(false)
-  const [loading, setLoading] = useState(true); const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({}); const [tradability, setTradability] = useState("")
-  const [account, setAccount] = useState(accounts.find((item) => item.is_default_analysis)?.account_alias ?? "")
+  const [loading, setLoading] = useState(true); const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({})
   const [createOpen, setCreateOpen] = useState(false); const [newName, setNewName] = useState("")
 
   useEffect(() => { const fromUrl = searchParams.get("instrument"); if (fromUrl && fromUrl !== selected) setSelected(fromUrl) }, [searchParams, selected])
   useEffect(() => {
-    const controller = new AbortController(); const sequence = ++requestSequence.current; setLoading(true); setSectionErrors({}); setTradability("")
+    const controller = new AbortController(); const sequence = ++requestSequence.current; setLoading(true); setSectionErrors({})
     const encoded = encodeURIComponent(selected)
     Promise.allSettled([
-      browserAfdFetch<MarketSummary>(`markets/${encoded}/summary${account ? `?account_alias=${encodeURIComponent(account)}` : ""}`, { signal: controller.signal }),
+      browserAfdFetch<MarketSummary>(`markets/${encoded}/summary`, { signal: controller.signal }),
       browserAfdFetch<NewsData>(`markets/news?instrument=${encoded}&limit=12`, { signal: controller.signal }),
       browserAfdFetch<CalendarData>(`markets/calendar?instrument=${encoded}&limit=20`, { signal: controller.signal }),
-      account ? browserAfdFetch<{ available: boolean; currently_tradable: boolean }>(`accounts/${encodeURIComponent(account)}/tradability/${encoded}`, { signal: controller.signal }) : Promise.resolve(null),
-    ]).then(([s, n, c, t]) => {
+    ]).then(([s, n, c]) => {
       if (sequence !== requestSequence.current) return
       const errors: Record<string, string> = {}
       if (s.status === "fulfilled") setSummary(s.value); else errors.summary = "Market summary is unavailable."
       if (n.status === "fulfilled") setNews(n.value); else errors.news = "News is unavailable."
       if (c.status === "fulfilled") setCalendar(c.value); else errors.calendar = "Calendar context is unavailable."
-      if (t.status === "fulfilled" && t.value) setTradability(t.value.available ? (t.value.currently_tradable ? "Tradable now" : "Available; market closed") : "Unavailable on selected account")
-      else if (account) errors.tradability = "Account tradability is unavailable."
       setSectionErrors(errors); setLoading(false)
     })
     return () => controller.abort()
-  }, [account, selected])
+  }, [selected])
   useEffect(() => {
     if (!query.trim()) { setResults([]); setSearched(false); return }
     const controller = new AbortController(); const timer = setTimeout(async () => { setSearching(true); try { const data = await browserAfdFetch<SearchData>(`markets/search?q=${encodeURIComponent(query)}`, { signal: controller.signal }); setResults(data.results ?? []); setSearched(true) } catch { if (!controller.signal.aborted) { setResults([]); setSearched(true) } } finally { if (!controller.signal.aborted) setSearching(false) } }, 250)
@@ -83,7 +78,6 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
     <Card><CardHeader><div className="flex justify-between"><div><CardTitle>{instrument?.display_symbol ?? selected.split(":", 2)[1]}</CardTitle><p className="text-sm text-muted-foreground">{instrument?.description ?? "Loading canonical instrument…"}</p></div></div></CardHeader><CardContent>{loading ? <Skeleton height="h-[460px]" /> : tradingViewSymbol ? <iframe key={tradingViewSymbol} title={`TradingView chart for ${instrument?.display_symbol}`} className="h-[460px] w-full rounded border" src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tradingViewSymbol)}&interval=60&theme=dark`} /> : <SectionMessage message="TradingView does not have an approved mapping for this instrument." />}<Source label="TradingView visual context; never authoritative for execution" /></CardContent></Card>
   </div>
   <div className="grid gap-5 lg:grid-cols-3"><SummaryCard summary={summary} loading={loading} error={sectionErrors.summary} /><Card><CardHeader><CardTitle>Relevant News</CardTitle></CardHeader><CardContent>{sectionErrors.news ? <SectionMessage message={sectionErrors.news} /> : <div className="space-y-3">{news.items.slice(0, 6).map((item, index) => <a key={`${item.headline}-${index}`} href={item.url} target="_blank" rel="noreferrer" className="block text-sm hover:underline">{item.headline}<span className="block text-xs text-muted-foreground">{item.source_name ?? "Finnhub"} · {item.published_at ? new Date(item.published_at).toLocaleString() : "Timestamp unavailable"}</span></a>)}</div>}<Source label="Finnhub" timestamp={news.last_updated} /></CardContent></Card><EconomicCalendar data={calendar} error={sectionErrors.calendar} filter={calendarFilter} setFilter={setCalendarFilter} expanded={expandedEvent} setExpanded={setExpandedEvent} /></div>
-  <Card><CardHeader><CardTitle>Tradability</CardTitle></CardHeader><CardContent><div className="flex flex-wrap items-center gap-2"><select value={account} onChange={(event) => setAccount(event.target.value)} className="h-10 rounded border bg-background px-3" aria-label="Execution account"><option value="">No execution account selected</option>{accounts.map((item) => <option key={item.public_id} value={item.account_alias}>{accountLabel(item)}{item.is_default_analysis ? " · Default" : ""}</option>)}</select>{tradability && <StatusPill label={tradability} />}{sectionErrors.tradability && <span className="text-sm text-amber-600">{sectionErrors.tradability}</span>}<Button asChild variant="outline"><Link href={`/trade?instrument=${encodeURIComponent(selected)}`}>Open in Trade</Link></Button></div></CardContent></Card>
   <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>Create watchlist</DialogTitle></DialogHeader><Input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Watchlist name" /><DialogFooter><Button disabled={!newName.trim()} onClick={() => void create()}>Create Watchlist</Button></DialogFooter></DialogContent></Dialog></div>
 }
 

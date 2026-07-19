@@ -1,6 +1,8 @@
 import { authenticatedBackendClient } from "@/lib/afd/backend"
 import type { UserPreferences } from "@/lib/afd/contracts"
-import { PageHeader } from "@/components/desk/page-header"
+import { SettingsPageHeader } from "@/components/settings/settings-page"
 import { NotificationSettings } from "../preferences-client"
-export const metadata={title:"Notifications"}
-export default async function Page(){const request=await authenticatedBackendClient();const initial=await request<UserPreferences>("/api/user-preferences");return <div className="space-y-7"><PageHeader eyebrow="Settings" title="Notifications" description="Choose which backend-confirmed events appear in the application."/><NotificationSettings initial={initial}/></div>}
+
+export const metadata = { title: "Notifications" }
+const fallback: UserPreferences = { appearance: "system", timezone: "America/Chicago", date_format: "locale", time_format: "locale", currency_display: "account", notifications: {}, updated_at: new Date(0).toISOString() }
+export default async function Page() { let initial = fallback; try { initial = await (await authenticatedBackendClient())<UserPreferences>("/api/user-preferences") } catch {} return <div className="space-y-7"><SettingsPageHeader title="Notifications" description="Choose which supported trading and automation events appear in the application." /><NotificationSettings initial={initial} /></div> }
