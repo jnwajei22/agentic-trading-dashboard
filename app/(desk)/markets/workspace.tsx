@@ -21,6 +21,7 @@ export type CalendarData = { items: CalendarEvent[]; warnings: Warning[]; last_u
 type SearchData = { results: CanonicalInstrument[]; warnings: Warning[] }
 
 const DEFAULT_INSTRUMENT = "forex:EUR/USD"
+const CHART_REFRESH_INTERVAL_MS = 30_000
 const canonicalFromStored = (value: string) => value.toLowerCase().startsWith("forex:") ? `forex:${value.split(":", 2)[1].toUpperCase()}` : value.startsWith("OANDA:") ? `forex:${value.split(":")[1].replace("_", "/")}` : value.includes("/") ? `forex:${value}` : value
 
 export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrument, initialNews, initialCalendar }: {
@@ -31,6 +32,7 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
   const [watchlists, setWatchlists] = useState(initialWatchlists); const [watchlistId, setWatchlistId] = useState(initialWatchlists[0]?.id ?? "")
   const watchlist = watchlists.find((item) => item.id === watchlistId)
   const [selected, setSelected] = useState(initialInstrument || DEFAULT_INSTRUMENT); const [summary, setSummary] = useState<MarketSummary | null>(null)
+  const [chartRefreshKey, setChartRefreshKey] = useState(0)
   const [news, setNews] = useState(initialNews); const [calendar, setCalendar] = useState(initialCalendar)
   const [calendarFilter, setCalendarFilter] = useState<"relevant"|"high"|"all">("relevant"); const [expandedEvent, setExpandedEvent] = useState<string | null>(null)
   const [query, setQuery] = useState(""); const [results, setResults] = useState<CanonicalInstrument[]>([]); const [searching, setSearching] = useState(false); const [searched, setSearched] = useState(false)
@@ -38,6 +40,15 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
   const [createOpen, setCreateOpen] = useState(false); const [newName, setNewName] = useState(""); const [editOpen, setEditOpen] = useState(false); const [editName, setEditName] = useState(""); const [editError, setEditError] = useState("")
 
   useEffect(() => { const fromUrl = searchParams.get("instrument"); if (fromUrl && fromUrl !== selected) setSelected(fromUrl) }, [searchParams, selected])
+  useEffect(() => {
+    const refreshChart = () => {
+      if (document.visibilityState === "visible") {
+        setChartRefreshKey((current) => current + 1)
+      }
+    }
+    const interval = window.setInterval(refreshChart, CHART_REFRESH_INTERVAL_MS)
+    return () => window.clearInterval(interval)
+  }, [])
   useEffect(() => {
     const controller = new AbortController(); const sequence = ++requestSequence.current; setLoading(true); setSectionErrors({})
     const encoded = encodeURIComponent(selected)
@@ -79,7 +90,7 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
       </div>
       <div className="mt-4 space-y-1">{watchlist?.items.map((item, index) => { const canonical = canonicalFromStored(item.canonical_id ?? item.symbol); const active = canonical === selected; return <div key={item.symbol} className={`flex items-center gap-1 rounded border p-1 ${active ? "border-emerald-500 bg-emerald-500/10" : ""}`}><button className="min-w-0 flex-1 truncate px-2 text-left text-sm" aria-current={active} onClick={() => choose(canonical)}>{canonical.split(":", 2)[1] ?? item.symbol}</button><Button size="icon" variant="ghost" onClick={() => void saveItems(watchlist.items.map((entry) => entry.symbol === item.symbol ? { ...entry, pinned: !entry.pinned } : entry))} aria-label={`Pin ${item.symbol}`}><Pin className={item.pinned ? "fill-current" : ""} /></Button><Button size="icon" variant="ghost" onClick={() => move(index, -1)} aria-label={`Move ${item.symbol} up`}><ArrowUp /></Button><Button size="icon" variant="ghost" onClick={() => move(index, 1)} aria-label={`Move ${item.symbol} down`}><ArrowDown /></Button><Button size="icon" variant="ghost" onClick={() => void removeItem(item.symbol)} aria-label={`Remove ${item.symbol}`}><X /></Button></div> })}{!watchlist?.items.length && <div className="rounded border border-dashed p-5 text-center text-sm"><p>This watchlist is empty.</p><Button variant="link" onClick={() => document.querySelector<HTMLInputElement>('[aria-label="Market search"]')?.focus()}>Search markets</Button></div>}</div>
     </CardContent></Card>
-    <Card><CardHeader><div className="flex justify-between"><div><CardTitle>{instrument?.display_symbol ?? selected.split(":", 2)[1]}</CardTitle><p className="text-sm text-muted-foreground">{instrument?.description ?? "Loading canonical instrument…"}</p></div></div></CardHeader><CardContent>{loading ? <Skeleton height="h-[460px]" /> : tradingViewSymbol ? <iframe key={tradingViewSymbol} title={`TradingView chart for ${instrument?.display_symbol}`} className="h-[460px] w-full rounded border" src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tradingViewSymbol)}&interval=60&theme=dark`} /> : <SectionMessage message="TradingView does not have an approved mapping for this instrument." />}<p className="mt-3 text-xs text-muted-foreground">TradingView visual context; never authoritative for execution.</p><Source label="tradingview" /></CardContent></Card>
+    <Card><CardHeader><div className="flex justify-between"><div><CardTitle>{instrument?.display_symbol ?? selected.split(":", 2)[1]}</CardTitle><p className="text-sm text-muted-foreground">{instrument?.description ?? "Loading canonical instrument…"}</p></div></div></CardHeader><CardContent>{loading ? <Skeleton height="h-[460px]" /> : tradingViewSymbol ? <iframe key={`${tradingViewSymbol}-${chartRefreshKey}`} title={`TradingView chart for ${instrument?.display_symbol}`} className="h-[460px] w-full rounded border" src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tradingViewSymbol)}&interval=60&theme=dark`} /> : <SectionMessage message="TradingView does not have an approved mapping for this instrument." />}<p className="mt-3 text-xs text-muted-foreground">TradingView visual context; never authoritative for execution.</p><Source label="tradingview" /></CardContent></Card>
   </div>
   <div className="grid gap-5 lg:grid-cols-3"><SummaryCard summary={summary} loading={loading} error={sectionErrors.summary} /><Card><CardHeader><CardTitle>Relevant News</CardTitle></CardHeader><CardContent>{sectionErrors.news ? <SectionMessage message={sectionErrors.news} /> : <div className="space-y-3">{news.items.slice(0, 6).map((item, index) => <a key={`${item.headline}-${index}`} href={item.url} target="_blank" rel="noreferrer" className="block text-sm hover:underline">{item.headline}<Source label={item.source_name??"finnhub"} timestamp={item.published_at}/></a>)}</div>}<Source label="finnhub" timestamp={news.last_updated} /></CardContent></Card><EconomicCalendar data={calendar} error={sectionErrors.calendar} filter={calendarFilter} setFilter={setCalendarFilter} expanded={expandedEvent} setExpanded={setExpandedEvent} /></div>
   <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>Create watchlist</DialogTitle></DialogHeader><Input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Watchlist name" /><DialogFooter><Button disabled={!newName.trim()} onClick={() => void create()}>Create Watchlist</Button></DialogFooter></DialogContent></Dialog>
