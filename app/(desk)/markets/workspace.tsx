@@ -79,66 +79,11 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
       </div>
       <div className="mt-4 space-y-1">{watchlist?.items.map((item, index) => { const canonical = canonicalFromStored(item.canonical_id ?? item.symbol); const active = canonical === selected; return <div key={item.symbol} className={`flex items-center gap-1 rounded border p-1 ${active ? "border-emerald-500 bg-emerald-500/10" : ""}`}><button className="min-w-0 flex-1 truncate px-2 text-left text-sm" aria-current={active} onClick={() => choose(canonical)}>{canonical.split(":", 2)[1] ?? item.symbol}</button><Button size="icon" variant="ghost" onClick={() => void saveItems(watchlist.items.map((entry) => entry.symbol === item.symbol ? { ...entry, pinned: !entry.pinned } : entry))} aria-label={`Pin ${item.symbol}`}><Pin className={item.pinned ? "fill-current" : ""} /></Button><Button size="icon" variant="ghost" onClick={() => move(index, -1)} aria-label={`Move ${item.symbol} up`}><ArrowUp /></Button><Button size="icon" variant="ghost" onClick={() => move(index, 1)} aria-label={`Move ${item.symbol} down`}><ArrowDown /></Button><Button size="icon" variant="ghost" onClick={() => void removeItem(item.symbol)} aria-label={`Remove ${item.symbol}`}><X /></Button></div> })}{!watchlist?.items.length && <div className="rounded border border-dashed p-5 text-center text-sm"><p>This watchlist is empty.</p><Button variant="link" onClick={() => document.querySelector<HTMLInputElement>('[aria-label="Market search"]')?.focus()}>Search markets</Button></div>}</div>
     </CardContent></Card>
-    <Card><CardHeader><div className="flex justify-between"><div><CardTitle>{instrument?.display_symbol ?? selected.split(":", 2)[1]}</CardTitle><p className="text-sm text-muted-foreground">{instrument?.description ?? "Loading canonical instrument…"}</p></div></div></CardHeader><CardContent>{loading ? <Skeleton height="h-[460px]" /> : tradingViewSymbol ? <TradingViewChart symbol={tradingViewSymbol} title={`TradingView chart for ${instrument?.display_symbol ?? tradingViewSymbol}`} /> : <SectionMessage message="TradingView does not have an approved mapping for this instrument." />}<p className="mt-3 text-xs text-muted-foreground">TradingView visual context; never authoritative for execution.</p><Source label="tradingview" /></CardContent></Card>
+    <Card><CardHeader><div className="flex justify-between"><div><CardTitle>{instrument?.display_symbol ?? selected.split(":", 2)[1]}</CardTitle><p className="text-sm text-muted-foreground">{instrument?.description ?? "Loading canonical instrument…"}</p></div></div></CardHeader><CardContent>{loading ? <Skeleton height="h-[460px]" /> : tradingViewSymbol ? <iframe key={tradingViewSymbol} title={`TradingView chart for ${instrument?.display_symbol}`} className="h-[460px] w-full rounded border" src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tradingViewSymbol)}&interval=60&theme=dark`} /> : <SectionMessage message="TradingView does not have an approved mapping for this instrument." />}<p className="mt-3 text-xs text-muted-foreground">TradingView visual context; never authoritative for execution.</p><Source label="tradingview" /></CardContent></Card>
   </div>
   <div className="grid gap-5 lg:grid-cols-3"><SummaryCard summary={summary} loading={loading} error={sectionErrors.summary} /><Card><CardHeader><CardTitle>Relevant News</CardTitle></CardHeader><CardContent>{sectionErrors.news ? <SectionMessage message={sectionErrors.news} /> : <div className="space-y-3">{news.items.slice(0, 6).map((item, index) => <a key={`${item.headline}-${index}`} href={item.url} target="_blank" rel="noreferrer" className="block text-sm hover:underline">{item.headline}<Source label={item.source_name??"finnhub"} timestamp={item.published_at}/></a>)}</div>}<Source label="finnhub" timestamp={news.last_updated} /></CardContent></Card><EconomicCalendar data={calendar} error={sectionErrors.calendar} filter={calendarFilter} setFilter={setCalendarFilter} expanded={expandedEvent} setExpanded={setExpandedEvent} /></div>
   <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>Create watchlist</DialogTitle></DialogHeader><Input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Watchlist name" /><DialogFooter><Button disabled={!newName.trim()} onClick={() => void create()}>Create Watchlist</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={editOpen} onOpenChange={setEditOpen}><DialogContent><DialogHeader><DialogTitle>Edit watchlist</DialogTitle></DialogHeader><div className="space-y-3"><Input value={editName} onChange={(event) => setEditName(event.target.value)} placeholder="Watchlist name" />{watchlist?.is_default&&<p className="text-sm text-muted-foreground">The default watchlist can be renamed, but it cannot be deleted.</p>}{editError&&<p role="alert" className="text-sm text-red-600">{editError}</p>}</div><DialogFooter className="sm:justify-between"><Button variant="destructive" disabled={!watchlist||watchlist.is_default} onClick={() => void deleteWatchlist()}><Trash2 />Delete</Button><div className="flex gap-2"><Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button><Button disabled={!editName.trim()} onClick={() => void renameWatchlist()}>Save Changes</Button></div></DialogFooter></DialogContent></Dialog></div>
-}
-
-
-function TradingViewChart({ symbol, title }: { symbol: string; title: string }) {
-  const container = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const root = container.current
-    if (!root) return
-
-    root.replaceChildren()
-
-    const widget = document.createElement("div")
-    widget.className = "tradingview-widget-container__widget"
-    widget.style.height = "100%"
-    widget.style.width = "100%"
-
-    const script = document.createElement("script")
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
-    script.type = "text/javascript"
-    script.async = true
-    script.text = JSON.stringify({
-      autosize: true,
-      symbol,
-      interval: "60",
-      timezone: "exchange",
-      theme: "dark",
-      style: "1",
-      locale: "en",
-      allow_symbol_change: false,
-      calendar: false,
-      hide_side_toolbar: false,
-      hide_top_toolbar: false,
-      hide_legend: false,
-      hide_volume: false,
-      save_image: false,
-      withdateranges: true,
-      support_host: "https://www.tradingview.com",
-    })
-
-    root.append(widget, script)
-
-    return () => {
-      root.replaceChildren()
-    }
-  }, [symbol])
-
-  return (
-    <div
-      ref={container}
-      role="region"
-      aria-label={title}
-      className="tradingview-widget-container h-[460px] w-full overflow-hidden rounded border"
-    />
-  )
 }
 
 function SummaryCard({ summary, loading, error }: { summary: MarketSummary | null; loading: boolean; error?: string }) { return <Card><CardHeader><CardTitle>Market Summary</CardTitle></CardHeader><CardContent>{loading ? <Skeleton height="h-40" /> : error ? <SectionMessage message={error} /> : <div className="space-y-4">{summary?.quote ? <div className="grid grid-cols-2 gap-3"><Datum label="Price" value={String(summary.quote.price)} /><Datum label="Change" value={summary.quote.change_percent == null ? "Unavailable" : `${summary.quote.change_percent.toFixed(2)}%`} /><Datum label="High" value={summary.quote.high == null ? "Unavailable" : String(summary.quote.high)} /><Datum label="Low" value={summary.quote.low == null ? "Unavailable" : String(summary.quote.low)} /></div> : <p className="text-sm text-muted-foreground">Quote unavailable. Economic drivers remain available below.</p>}<div className="space-y-2">{summary?.drivers?.map((driver) => <div key={driver.series_id} className="rounded border p-3 text-sm"><div className="flex justify-between gap-2"><strong>{driver.label}</strong><span>{driver.value} {driver.unit}</span></div><p className="text-xs text-muted-foreground">{driver.applies_to} · {formatEnum(driver.category)}</p><Source label={driver.source} timestamp={driver.observation_date} status={driver.stale?"Stale":"Current"}/></div>)}</div></div>}<Source label={summary?.sources.map((item) => item.provider).join(", ") || "finnhub / fred"} timestamp={summary?.sources[0]?.updated_at} status={summary?.partial ? "partial" : summary?.sources[0]?.status} /></CardContent></Card> }
