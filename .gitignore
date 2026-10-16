@@ -26,3 +26,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Internal Python engine
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+server/storage/

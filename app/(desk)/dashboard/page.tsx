@@ -7,7 +7,7 @@ import {
   Waypoints,
 } from "lucide-react"
 
-import { authenticatedBackendClient } from "@/lib/afd/backend"
+import { workspaceBackendClient } from "@/lib/afd/backend"
 import { loadDashboardData } from "@/lib/afd/dashboard-data"
 import {
   accountContext,
@@ -41,7 +41,7 @@ export default async function DashboardPage() {
   let data
 
   try {
-    data = await loadDashboardData(await authenticatedBackendClient())
+    data = await loadDashboardData(await workspaceBackendClient())
   } catch {
     data = await loadDashboardData(async () => {
       throw new Error("unavailable")

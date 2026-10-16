@@ -1,25 +1,14 @@
 export type FailureCategory = "configuration" | "authentication" | "unauthorized" | "not_found" | "timeout" | "dns" | "tls" | "server_error" | "http_error" | "network"
 type RuntimeEnv = Record<string, string | undefined>
 
-function host(value?: string) {
-  if (!value) return null
-  try { return new URL(value.startsWith("http") ? value : `https://${value}`).hostname } catch { return null }
-}
-
+/** Internal service binding only. The retired external backend URL is never read. */
 export function resolveBackendBaseUrl(env: RuntimeEnv = process.env) {
-  const configured = (env.BACKEND_API_BASE_URL || env.NEXT_PUBLIC_API_BASE_URL)?.trim().replace(/\/$/, "")
-  if (!configured) throw new Error("backend_url_not_configured")
-  let target: URL
-  try { target = new URL(configured) } catch { throw new Error("backend_url_invalid") }
-  if (!/^https?:$/.test(target.protocol)) throw new Error("backend_url_invalid_protocol")
-  if (target.username || target.password || target.search || target.hash) throw new Error("backend_url_contains_credentials_or_parameters")
-  if (env.NODE_ENV === "production") {
-    if (["localhost", "127.0.0.1", "::1"].includes(target.hostname)) throw new Error("backend_url_localhost_in_production")
-    if (target.protocol !== "https:") throw new Error("backend_url_requires_https")
-    const frontendHosts = [host(env.APP_BASE_URL), host(env.AUTH0_BASE_URL), host(env.VERCEL_URL)].filter(Boolean)
-    if (frontendHosts.includes(target.hostname)) throw new Error("backend_url_points_to_frontend")
-  }
-  return target.origin + target.pathname.replace(/\/$/, "")
+  const configured = env.DESK_ENGINE_URL?.trim().replace(/\/$/, "")
+    || (env.NODE_ENV !== "production" ? "http://127.0.0.1:8000" : "")
+  if (!configured) throw new Error("desk_engine_binding_not_configured")
+  const target = new URL(configured)
+  if (!/^https?:$/.test(target.protocol) || target.username || target.password || target.search || target.hash || target.pathname !== "/") throw new Error("desk_engine_binding_invalid")
+  return target.origin
 }
 
 export function classifyNetworkError(error: unknown): FailureCategory {

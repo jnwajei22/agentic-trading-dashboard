@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+sqlalchemy
+psycopg2-binary
+pytest
+pytest-asyncio
+PyJWT[crypto]>=2.9,<3
+openai==2.46.0
+cryptography
+tzdata

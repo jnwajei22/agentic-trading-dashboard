@@ -7,10 +7,11 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "dev:engine": "cd server && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
+    "test:engine": "cd server && python -m pytest -q"
   },
   "dependencies": {
-    "@auth0/nextjs-auth0": "^4.22.0",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
