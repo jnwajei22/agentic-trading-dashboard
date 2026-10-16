@@ -22,7 +22,7 @@ def test_health():
 
 
 def test_ready():
-    assert client.get("/ready").json() == {"status": "ready"}
+    assert client.get("/ready").json() == {"status": "ready", "database": "sqlite"}
 
 
 def test_tradingview_webhook_secret_validation(monkeypatch):

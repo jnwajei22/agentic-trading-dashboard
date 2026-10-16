@@ -10,6 +10,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 
 logger=logging.getLogger(__name__)
 
@@ -23,12 +24,13 @@ class ScheduleStorageError(RuntimeError):pass
 class ScheduleRepository:
     """SQLite durable scheduler state. BEGIN IMMEDIATE is the single-process/dev lease fallback."""
     def __init__(self,db_path:str|Path|None=None)->None:
-        self.db_path=Path(db_path or settings.sqlite_path);self.db_path.parent.mkdir(parents=True,exist_ok=True);self._initialize()
+        self.db_path=storage_path(db_path);self._initialize()
 
     def _connect(self)->sqlite3.Connection:
-        db=sqlite3.connect(self.db_path,timeout=30);db.row_factory=sqlite3.Row;db.execute("PRAGMA foreign_keys=ON");return db
+        db=connect(self.db_path,timeout=30);db.row_factory=sqlite3.Row;db.execute("PRAGMA foreign_keys=ON");return db
 
     def _initialize(self)->None:
+        if using_postgres(): return
         with self._connect() as db:db.executescript("""
             CREATE TABLE IF NOT EXISTS autonomous_schedules(
                 id TEXT PRIMARY KEY,user_sub TEXT NOT NULL,profile_ref TEXT NOT NULL,
@@ -76,6 +78,7 @@ class ScheduleRepository:
         expression=json.dumps({"times":local_times,"recurrence":payload},separators=(",",":"))
         now=utcnow().isoformat()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             existing=db.execute("SELECT id,created_at FROM autonomous_schedules WHERE user_sub=? AND profile_ref=?",(user_sub,profile_ref)).fetchone()
             schedule_id=existing["id"] if existing else f"schedule_{uuid4().hex}"
             created=existing["created_at"] if existing else now
@@ -146,7 +149,7 @@ class ScheduleRepository:
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(dispatch_id,schedule["id"],schedule["user_sub"],schedule["profile_ref"],
                     scheduled.isoformat(),run_key,state,reason,worker_id if not stale else None,lease if not stale else None,
                     now_iso if not stale else None,now_iso if stale else None,now_iso,now_iso))
-                except sqlite3.IntegrityError:
+                except IntegrityError:
                     logger.info("autonomous_schedule_duplicate_suppressed schedule_id=%s profile_ref=%s scheduled_for=%s",
                         schedule["id"],schedule["profile_ref"],scheduled.isoformat())
                 db.execute("""UPDATE autonomous_schedules SET next_run_at=?,last_run_at=?,last_run_status=?,updated_at=? WHERE id=?""",

@@ -5,7 +5,7 @@ pydantic-settings
 python-dotenv
 httpx
 sqlalchemy
-psycopg2-binary
+psycopg2-binary==2.9.13
 pytest
 pytest-asyncio
 PyJWT[crypto]>=2.9,<3

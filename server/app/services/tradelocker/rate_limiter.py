@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 
 
 @dataclass(frozen=True)
@@ -22,8 +23,9 @@ class TradeLockerRequestLimiter:
     """Cross-process SQLite lease and cooldown for candle-history requests."""
 
     def __init__(self, db_path: str | Path | None = None) -> None:
-        self.db_path = Path(db_path or settings.sqlite_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = storage_path(db_path)
+
+        if using_postgres(): return
         with self._connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS tradelocker_request_limits(
                 connection_id TEXT PRIMARY KEY, lease_owner TEXT, lease_until REAL NOT NULL DEFAULT 0,
@@ -32,7 +34,7 @@ class TradeLockerRequestLimiter:
             )""")
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        return connect(self.db_path, timeout=30, isolation_level=None)
 
     async def acquire(self, connection_id: str) -> LimiterLease:
         owner = uuid4().hex
