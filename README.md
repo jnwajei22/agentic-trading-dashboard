@@ -6,7 +6,7 @@ Standalone Next.js web client for the existing Agentic Forex Desk platform. It p
 
 ```text
 Browser
-  │ same-origin session + JSON only
+  │ same-origin session + JSON / assistant stream
   ▼
 Vercel / Next.js 15
   ├─ Auth0 server session
@@ -22,7 +22,7 @@ Agentic Forex Desk FastAPI service (agentic-forex-app)
   └─ durable scheduler worker (Raspberry Pi or hosted service)
 ```
 
-`agentic-trading-dashboard` is a separate deployable client. `agentic-forex-app` remains authoritative for identity, credentials, broker state, risk, execution, schedules, and worker state. MCP and this application are separate authenticated clients of that same backend. The browser never calls FastAPI or MCP directly.
+`agentic-trading-dashboard` is a separate deployable client. `agentic-forex-app` remains authoritative for identity, credentials, broker state, risk, execution, schedules, and worker state. The in-product assistant calls native FastAPI services through OpenAI function calling. The browser calls only the authenticated same-origin Next.js layer.
 
 ## Local setup
 
@@ -97,3 +97,11 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+## Native assistant
+
+The expandable Desk Assistant lives in AppShell. Research reads only; Co-op creates previews and requires a separate approval click; Autonomous uses a bound profile and existing demo controls. It cannot enable autonomy or clear kill switches. Conversation history stays on the backend. Selected instrument/profile/schedule/run context is shared across the relevant desk pages.
+
+`/api/assistant/stream` forwards the authenticated SSE stream without buffering JSON. Existing JSON history and approval endpoints remain narrowly allowlisted under `/api/afd`. Mutations require the same origin. The client never receives an OpenAI key. Set OPENAI_API_KEY and AGENT_MODEL only on FastAPI; no additional frontend provider environment variable is needed.
+
+The old ChatGPT connection settings and authorized-client UI have been removed. Existing ordinary TradeLocker onboarding and Auth0 login stay in place. No deployment or production trading is needed to run the mocked tests.

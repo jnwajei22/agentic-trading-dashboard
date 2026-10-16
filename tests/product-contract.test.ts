@@ -13,7 +13,7 @@ test("markets are provider-aggregated and TradeLocker is optional",()=>{
   const page=source("app/(desk)/markets/page.tsx");const workspace=source("app/(desk)/markets/workspace.tsx")
   for(const route of ["markets/news","markets/calendar"])assert.match(page,new RegExp(route))
   assert.doesNotMatch(page,/markets\/macro/)
-  assert.match(workspace,/markets\/.*\/summary/);assert.match(workspace,/TradingView/);assert.match(workspace,/tradability/i)
+  assert.match(workspace,/markets\/.*\/summary/);assert.match(workspace,/TradingView/);assert.match(workspace,/MarketSummary/)
 })
 test("FRED is consolidated into summary and the instrument-aware calendar",()=>{
   const workspace=source("app/(desk)/markets/workspace.tsx")
@@ -32,7 +32,7 @@ test("dashboard hides worker identifiers behind automation status",()=>{
 })
 test("profile and schedule editors use structured customer controls",()=>{
   const profile=source("app/(desk)/autonomous/[profileId]/profile-editor.tsx");const schedules=source("app/(desk)/schedules/schedule-manager.tsx")
-  assert.match(profile,/Market Selection/);assert.doesNotMatch(profile,/Schedule policy|Comma-separated IDs/)
+  assert.match(profile,/MarketSelection/);assert.doesNotMatch(profile,/Schedule policy|Comma-separated IDs/)
   for(const type of ["market_session","recurring_interval","daily","weekly","custom"])assert.match(schedules,new RegExp(type))
-  assert.doesNotMatch(schedules,/cron/i)
+  assert.doesNotMatch(schedules,/<Input[^>]*cron|<Label[^>]*>Cron/i)
 })

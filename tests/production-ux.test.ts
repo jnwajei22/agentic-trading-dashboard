@@ -15,15 +15,16 @@ test("shared formatting keeps product acronyms and currency pairs intact", () =>
 
 test("automation status defaults failed or unknown operational state to safe messaging", () => {
   const base = {
+    status: null,
     accounts: [],
     profiles: [{ enabled: true }],
     schedules: [{ enabled: true }],
     controls: { global_autonomous_kill_switch: false, demo_autonomous_enabled: true },
     worker: { status: "healthy" },
-  } as Parameters<typeof automationStatus>[0]
+  } as unknown as Parameters<typeof automationStatus>[0]
   assert.equal(automationStatus({ ...base, status: null }).state, "Broker Disconnected")
-  assert.equal(automationStatus({ ...base, status: { connected: true }, controls: { ...base.controls, global_autonomous_kill_switch: true } }).state, "Blocked by Kill Switch")
-  assert.equal(automationStatus({ ...base, status: { connected: true }, worker: { status: "unknown", workers: [] } }).state, "Needs Attention")
+  assert.equal(automationStatus({ ...base, status: { connected: true, status: "ready" }, controls: { ...base.controls, global_autonomous_kill_switch: true } }).state, "Blocked by Kill Switch")
+  assert.equal(automationStatus({ ...base, status: { connected: true, status: "ready" }, worker: { status: "unknown", workers: [] } }).state, "Needs Attention")
 })
 
 test("global account context and command palette are shared customer controls", () => {
@@ -42,8 +43,8 @@ test("first-run checklist is derived from backend resources", () => {
   for (const label of ["Add a trading connection", "Select a trading account", "Create a strategy", "Configure risk", "Create a schedule", "Run a demo test"]) {
     assert.match(dashboard, new RegExp(label))
   }
-  assert.match(dashboard, /complete:data\.connections\.some/)
-  assert.match(dashboard, /run\.dry_run\|\|run\.trigger_reason===\"demo_test\"/)
+  assert.match(dashboard, /complete:\s*data\.connections\.some/)
+  assert.match(dashboard, /run\.dry_run\s*\|\|\s*run\.trigger_reason\s*===\s*"demo_test"/)
   assert.doesNotMatch(checklist, /localStorage|dismiss/i)
 })
 

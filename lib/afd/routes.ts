@@ -10,7 +10,7 @@ const exact: Record<string, readonly string[]> = {
   "markets/calendar": ["GET"],
   "user-preferences": ["GET", "PATCH"], "watchlists": ["GET", "POST"],
   "activity": ["GET"], "status": ["GET"],
-  "integrations/mcp": ["GET"],
+  "assistant/conversations": ["GET"],
   "providers": ["GET"], "trading/connections": ["GET"], "trading/accounts": ["GET"],
   "trading/order-calculations": ["POST"],
 }
@@ -36,7 +36,8 @@ const dynamic: Array<[RegExp, readonly string[]]> = [
   [/^autonomous-schedules\/[^/]+$/, ["GET", "PUT", "DELETE"]],
   [/^autonomous-schedules\/[^/]+\/(pause|resume)$/, ["POST"]],
   [/^autonomous-schedule-runs\/[^/]+\/retry$/, ["POST"]],
-  [/^integrations\/mcp\/authorized-clients\/grant_[a-f0-9]{32}\/revoke$/, ["POST"]],
+  [/^assistant\/conversations\/chat_[a-f0-9]{32}$/, ["GET"]],
+  [/^assistant\/conversations\/chat_[a-f0-9]{32}\/approvals\/msg_[a-f0-9]{32}$/, ["POST"]],
 ]
 
 export function isAllowedAfdRoute(path: string, method: string) {

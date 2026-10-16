@@ -40,7 +40,7 @@ test("preview values freeze and expiry requires a refresh",()=>{
   const live={price:1};const frozen={price:2};const preview={calculation:frozen,expires_at:new Date(Date.now()+1000).toISOString()}
   assert.equal(activeCalculation(live,preview),frozen);assert.equal(previewExpired(preview),false)
   assert.equal(previewExpired({...preview,expires_at:new Date(Date.now()-1).toISOString()}),true)
-  assert.match(source,/if\(!payload\.account_id\|\|ticket\.preview\)return/)
+  assert.match(source,/if\(!payload\.account_id\|\|!payload\.instrument_id\|\|ticket\.preview\)return/)
 })
 test("executable quotes come only from the same-origin backend contract",()=>{
   assert.match(source,/trading\/order-calculations/);assert.match(source,/quote\.source/)

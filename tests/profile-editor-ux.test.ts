@@ -17,7 +17,7 @@ test("customer editor omits implementation format terminology",()=>{
 test("actual profile name heads the page and legacy names receive useful display fallbacks",()=>{
   assert.equal(profileDisplayName("London Session",profile),"London Session")
   assert.equal(profileDisplayName("ChatGPT",profile),"Hourly Forex")
-  assert.match(page,/listed\?\.name/);assert.match(editor,/<h1[^>]*>\{title\}/)
+  assert.match(page,/listed\?\.name/);assert.match(editor,/<Input aria-label="Execution profile name" value=\{name\}/)
   assert.match(editor,/contract\.account_number/);assert.doesNotMatch(page,/title=\{`Profile/)
 })
 test("header retains synchronized unsaved state and prominent enabled control",()=>{

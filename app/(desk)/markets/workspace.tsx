@@ -1,4 +1,5 @@
 "use client"
+import { useAssistantContext } from "@/lib/afd/assistant-context"
 /* eslint-disable jsx-a11y/role-has-required-aria-props -- selection is represented by URL state and focus */
 
 import { useEffect, useRef, useState } from "react"
@@ -70,6 +71,7 @@ export function MarketsWorkspace({ accounts, initialWatchlists, initialInstrumen
   async function deleteWatchlist() { if (!watchlist || watchlist.is_default) return; try { await mutateAfd(`watchlists/${watchlist.id}`, "DELETE"); const remaining = watchlists.filter((item) => item.id !== watchlist.id); setWatchlists(remaining); setWatchlistId(remaining[0]?.id ?? ""); setEditOpen(false) } catch (error) { setEditError(error instanceof Error ? error.message : "Unable to delete this watchlist.") } }
   async function removeItem(symbol: string) { if (!watchlist) return; await saveItems(watchlist.items.filter((item) => item.symbol !== symbol).map((item, position) => ({ ...item, position }))) }
   function move(index: number, delta: number) { if (!watchlist) return; const items = [...watchlist.items]; const target = index + delta; if (target < 0 || target >= items.length) return; [items[index], items[target]] = [items[target], items[index]]; void saveItems(items.map((item, position) => ({ ...item, position }))) }
+  useAssistantContext({market:selected})
   const instrument = summary?.instrument; const tradingViewSymbol = instrument?.provider_symbols.tradingview
   return <div className="space-y-5"><div className="grid gap-5 xl:grid-cols-[.75fr_2fr]">
     <Card><CardHeader><div className="flex items-center justify-between"><CardTitle>Watchlists</CardTitle><div className="flex gap-1"><Button size="icon" variant="ghost" onClick={openEdit} disabled={!watchlist} aria-label="Edit watchlist"><Pencil /></Button><Button size="icon" variant="ghost" onClick={() => setCreateOpen(true)} aria-label="Create watchlist"><Plus /></Button></div></div></CardHeader><CardContent>
