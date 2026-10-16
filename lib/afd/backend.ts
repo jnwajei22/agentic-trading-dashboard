@@ -1,8 +1,7 @@
-import { auth0 } from "./auth"
 import { classifyNetworkError, classifyStatus, resolveBackendBaseUrl } from "./backend-runtime"
 import { AfdBackendError, backendMessage, safeErrorPayload } from "./errors"
 
-export async function forwardWithAuthorization<T>(path: string, authorization: string, init: RequestInit = {}): Promise<{ data: T; status: number }> {
+export async function forwardToWorkspace<T>(path: string, init: RequestInit = {}): Promise<{ data: T; status: number }> {
   let baseUrl: string
   try { baseUrl = resolveBackendBaseUrl() } catch { throw new AfdBackendError(503, "Backend API URL is not configured safely.", "backend_unavailable", {}, "configuration") }
   let response: Response
@@ -11,7 +10,7 @@ export async function forwardWithAuthorization<T>(path: string, authorization: s
     response = await fetch(`${baseUrl}${path}`, {
       ...init,
       cache: "no-store",
-      headers: { Authorization: authorization, ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
+      headers: { ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
       signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
     })
   } catch (error) {
@@ -30,16 +29,11 @@ export async function forwardWithAuthorization<T>(path: string, authorization: s
   return { data: parsed as T, status: response.status }
 }
 
-export async function authenticatedBackendClient() {
-  const session = await auth0.getSession()
-  if (!session) throw new AfdBackendError(401, "Please log in.", "not_authenticated", {}, "authentication")
-  let token: string
-  try { ({ token } = await auth0.getAccessToken()) } catch { throw new AfdBackendError(401, "Could not get backend access token.", "token_acquisition_failed", {}, "authentication") }
-  const authorization = `Bearer ${token}`
-  return async <T>(path: string, init?: RequestInit) => (await forwardWithAuthorization<T>(path, authorization, init)).data
+export async function workspaceBackendClient() {
+  return async <T>(path: string, init?: RequestInit) => (await forwardToWorkspace<T>(path, init)).data
 }
 
 export async function serverBackendFetch<T>(path: string, init?: RequestInit) {
-  const request = await authenticatedBackendClient()
+  const request = await workspaceBackendClient()
   return request<T>(path, init)
 }

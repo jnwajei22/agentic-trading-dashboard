@@ -1,4 +1,4 @@
-import { authenticatedBackendClient } from "@/lib/afd/backend"
+import { workspaceBackendClient } from "@/lib/afd/backend"
 import type { Account, Watchlist } from "@/lib/afd/contracts"
 import { MarketsWorkspace, type CalendarData, type NewsData } from "./workspace"
 import { PageHeader } from "@/components/desk/page-header"
@@ -10,7 +10,7 @@ export default async function MarketsPage({ searchParams }: { searchParams: Prom
   let accounts: Account[] = []; let watchlists: Watchlist[] = []
   let news: NewsData = { items: [], warnings: [] }; let calendar: CalendarData = { items: [], warnings: [] }
   try {
-    const request = await authenticatedBackendClient()
+    const request = await workspaceBackendClient()
     const [a, n, c, w] = await Promise.allSettled([
       request<{ accounts: Account[] }>("/api/trading/accounts"), request<NewsData>("/api/markets/news?limit=12"),
       request<CalendarData>(`/api/markets/calendar?instrument=${encodeURIComponent(initialInstrument)}&limit=20`), request<{ watchlists: Watchlist[] }>("/api/watchlists"),

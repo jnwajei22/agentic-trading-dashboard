@@ -1,0 +1,28 @@
+{
+  "services": {
+    "dashboard": {
+      "root": ".",
+      "framework": "nextjs",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "engine",
+          "format": "url",
+          "env": "DESK_ENGINE_URL"
+        }
+      ]
+    },
+    "engine": {
+      "root": "server",
+      "entrypoint": "app.main:app"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "dashboard"
+      }
+    }
+  ]
+}

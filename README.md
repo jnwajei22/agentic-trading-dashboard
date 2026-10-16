@@ -1,107 +1,51 @@
-# Agentic Trading Desk
+# Agentic Trading Dashboard
 
-Standalone Next.js web client for the existing Agentic Forex Desk platform. It provides authenticated TradeLocker onboarding, account and execution-profile management, broker market discovery, autonomous safety controls, durable schedules, and structured audit activity without creating a second backend or source of truth.
+This repository owns the complete trading desk: the Next.js interface, same-origin API routes, native AI assistant, and an internal Python trading engine under `server/`. It has no runtime dependency on `agentic-trading-app` or the former MCP deployment.
 
-## Architecture
+There is **no login system**. Every visitor uses the same server-selected workspace. The browser cannot choose an owner. Mode restrictions, ownership checks, co-op approvals, demo-only autonomous execution, kill switch, and risk controls remain enforced by the internal engine. Anyone who can reach the desk can operate that shared workspace.
 
-```text
-Browser
-  │ same-origin session + JSON / assistant stream
-  ▼
-Vercel / Next.js 15
-  ├─ Auth0 server session
-  ├─ protected React server routes
-  └─ /api/afd/[...path] strict method/path allowlist
-       │ Authorization: Bearer <server-acquired token>
-       ▼
-Agentic Forex Desk FastAPI service (agentic-forex-app)
-  ├─ database-backed Auth0 identity
-  ├─ encrypted TradeLocker connections and accounts
-  ├─ execution profiles and risk rules
-  ├─ autonomous controls, decisions, and audits
-  └─ durable scheduler worker (Raspberry Pi or hosted service)
+## Run locally
+
+Requires Node.js 20+, pnpm, and Python 3.11+.
+
+```bash
+pnpm install
+python -m venv server/.venv
+server/.venv/bin/pip install -r server/requirements.txt
+cp server/.env.example server/.env
+cd server
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`agentic-trading-dashboard` is a separate deployable client. `agentic-forex-app` remains authoritative for identity, credentials, broker state, risk, execution, schedules, and worker state. The in-product assistant calls native FastAPI services through OpenAI function calling. The browser calls only the authenticated same-origin Next.js layer.
+In another terminal at the repository root:
 
-## Local setup
-
-Requirements: Node.js 20+, pnpm, an Auth0 Regular Web Application, and a reachable Agentic Forex Desk backend.
-
-```powershell
-Copy-Item .env.example .env.local
-pnpm install
+```bash
 pnpm dev
 ```
 
-Required variables:
+Open `http://localhost:3000`. The local engine defaults to loopback port 8000. No Auth0 variables or retired backend URL are used. Configure `BROKER_SECRET_KEY` in `server/.env` before connecting a broker. Set `AGENT_MODEL` and `OPENAI_API_KEY` there to enable model responses. No browser receives those secrets.
 
-- `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, and a cryptographically random `AUTH0_SECRET`
-- `APP_BASE_URL`, normally `http://localhost:3000`
-- `AUTH0_AUDIENCE`, exactly matching the FastAPI `AUTH_AUDIENCE`
-- `BACKEND_API_BASE_URL`, the FastAPI origin consumed only by Next.js server code. `NEXT_PUBLIC_API_BASE_URL` remains a deprecated compatibility fallback.
+`WORKSPACE_OWNER_SUB` defaults to `shared-workspace`. An operator may explicitly set it to an existing owner identifier to reuse that owner's records on an existing local database. This does not move, merge, discover, or reassign any data. A new empty database creates an empty workspace.
 
-Production backend URLs must be HTTPS, must not be localhost, and must not point back to the Vercel frontend. Never place Auth0 client secrets, TradeLocker credentials, encryption secrets, access tokens, or OpenAI keys in browser state or storage.
+## One deployment project
 
-## Auth0 configuration
+`vercel.json` defines a Next.js dashboard and a private Python engine in the **same project** using Vercel Services (beta). All public ingress goes to Next.js. `DESK_ENGINE_URL` is injected by the private service binding; do not set it to the retired deployment. Next.js retains allowlisted API routes, same-origin mutation checks, server rendering, and unbuffered streaming. The engine has no public ingress rewrite and no browser CORS allowance.
 
-For local development add:
+**Persistence remains an unresolved production prerequisite:** SQLite is still authoritative and needs a writable durable filesystem. A stateless Vercel function filesystem is not durable SQLite hosting. This configuration consolidates code/routing; it is not a claim that production storage or deployment has been verified. Neon has not been connected, PostgreSQL has not been applied, and SQLite data has not been migrated. Do not use ephemeral storage for broker connections, approvals, or trading ledgers.
 
-- Allowed callback URL: `http://localhost:3000/auth/callback`
-- Allowed logout URL: `http://localhost:3000`
-- Allowed web origin: `http://localhost:3000`
+Embedded scheduling defaults off. Continuous scheduled runs need a persistent worker using the same durable database; the worker code is included under `server/` and has not been started.
 
-Repeat these entries with the stable production origin. Preview deployments need explicitly registered callbacks or a controlled preview-domain strategy. The requested audience must issue the backend scopes `forex:read forex:preview forex:execute`.
+## Verify
 
-## Vercel and backend deployment
-
-Import this repository as its own Vercel project and configure the small bootstrap set in `.env.example`. Set `APP_BASE_URL` to the stable Vercel domain and `BACKEND_API_BASE_URL` to the public HTTPS FastAPI origin. A Raspberry Pi backend can remain private behind Cloudflare Tunnel; the tunnel origin is the backend URL, while the persistent autonomous worker continues running beside the backend. Vercel never starts or owns the scheduler worker.
-
-## Provider boundaries
-
-The UI consumes normalized `/api/trading/*` and `/api/providers` contracts through the authenticated same-origin proxy. Broker, platform, execution, chart, signal, and market-data roles are displayed separately. TradingView is chart/signal infrastructure, not a broker, and its chart prices are never execution-authoritative. Robinhood Agentic remains visibly unconfigured until an official MCP/OAuth integration is implemented and tested. Users never enter deployment environment variables or platform API keys.
-
-Markets use canonical instrument IDs in URL and watchlist state. The backend maps each canonical ID independently for TradingView, Finnhub, and the selected execution provider; raw provider symbols are not interchangeable.
-
-The backend should allow the stable frontend origin where its deployment configuration requires it. Browser requests themselves remain same-origin to Vercel, and only the server proxy forwards bearer tokens.
-
-## Supported web features
-
-- Auth0 login/logout and protected routes
-- TradeLocker credential onboarding, discovery, selection, reauthentication, and connection/account settings
-- Operational dashboard with partial endpoint failure isolation
-- Broker instrument search, filters, groups, and profile-universe context
-- Backend-confirmed kill switch and demo/live autonomous controls with rollback and live confirmation
-- Execution profile creation, enable/disable, exact-name deletion, V2 editing, capabilities, and validation
-- Durable schedule create/edit/pause/resume/delete and backend-approved safe retry
-- Autonomous runs, run audits, demo executions, and safety-control audit history
-- Responsive accessible navigation and light/dark themes
-
-## Explicitly unsupported web features
-
-The current backend has no authenticated web REST contracts for canonical TradeLocker candles, open positions, pending orders, order previews, manual submission, or order history. The UI marks those areas unavailable and never fabricates data, calls MCP, or substitutes TradingView/Finnhub values for execution. TradingView is mentioned only as non-authoritative visual context. Live autonomy also remains disabled unless the backend explicitly reports support.
-
-## Security boundaries
-
-- `/api/afd/[...path]` rejects paths and methods outside its explicit allowlist with 404.
-- Auth0 access tokens are acquired on the server and forwarded only to the validated backend origin.
-- Requests use a ten-second timeout, `cache: no-store`, status preservation, and sanitized JSON errors.
-- Tokens, cookies, credentials, and request bodies are never logged.
-- Unknown operational state defaults to blocked or unavailable; safety mutations require backend confirmation.
-- TradeLocker passwords are submitted through the same-origin proxy and never stored in URLs, browser storage, or client-readable cookies.
-
-## Quality commands
-
-```powershell
-pnpm lint
+```bash
 pnpm test
+pnpm exec tsc --noEmit
+pnpm lint
 pnpm build
+cd server
+.venv/bin/python -m pytest -q
 ```
 
-## Native assistant
+Tests use mocks/temporary databases. The opt-in real broker test remains skipped. Do not run live execution to verify this change.
 
-The expandable Desk Assistant lives in AppShell. Research reads only; Co-op creates previews and requires a separate approval click; Autonomous uses a bound profile and existing demo controls. It cannot enable autonomy or clear kill switches. Conversation history stays on the backend. Selected instrument/profile/schedule/run context is shared across the relevant desk pages.
-
-`/api/assistant/stream` forwards the authenticated SSE stream without buffering JSON. Existing JSON history and approval endpoints remain narrowly allowlisted under `/api/afd`. Mutations require the same origin. The client never receives an OpenAI key. Set OPENAI_API_KEY and AGENT_MODEL only on FastAPI; no additional frontend provider environment variable is needed.
-
-The old ChatGPT connection settings and authorized-client UI have been removed. Existing ordinary TradeLocker onboarding and Auth0 login stay in place. No deployment or production trading is needed to run the mocked tests.
+See [consolidation details](docs/architecture/dashboard-consolidation.md) and the [PostgreSQL proposal](docs/architecture/postgresql-proposal.sql). The SQL is a design artifact only.

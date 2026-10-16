@@ -6,9 +6,9 @@ import { isAllowedAfdRoute } from "../lib/afd/routes"
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
 
-test("server configuration prefers the private backend variable with legacy compatibility", () => {
-  assert.equal(resolveBackendBaseUrl({ BACKEND_API_BASE_URL:"https://new.example", NEXT_PUBLIC_API_BASE_URL:"https://old.example" }), "https://new.example")
-  assert.equal(resolveBackendBaseUrl({ NEXT_PUBLIC_API_BASE_URL:"https://old.example" }), "https://old.example")
+test("server configuration uses only the internal engine binding", () => {
+  assert.equal(resolveBackendBaseUrl({ DESK_ENGINE_URL:"https://new.example", NEXT_PUBLIC_API_BASE_URL:"https://old.example" }), "https://new.example")
+  assert.equal(resolveBackendBaseUrl({ NODE_ENV:"development", NEXT_PUBLIC_API_BASE_URL:"https://old.example" }), "http://127.0.0.1:8000")
   assert.doesNotMatch(source("lib/afd/backend-runtime.ts"), /window\.|document\./)
 })
 

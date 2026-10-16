@@ -1,22 +1,24 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { resolveBackendBaseUrl } from "../lib/afd/backend-runtime"
-import { forwardWithAuthorization } from "../lib/afd/backend"
+import { forwardToWorkspace } from "../lib/afd/backend"
 
-test("backend URL validation rejects unsafe production targets", () => {
-  assert.throws(() => resolveBackendBaseUrl({ NODE_ENV: "production", BACKEND_API_BASE_URL: "http://localhost:8000" }))
-  assert.throws(() => resolveBackendBaseUrl({ NODE_ENV: "production", BACKEND_API_BASE_URL: "http://api.example.com" }))
-  assert.equal(resolveBackendBaseUrl({ NODE_ENV: "production", BACKEND_API_BASE_URL: "https://api.example.com/" }), "https://api.example.com")
+test("engine binding ignores retired backend variables and validates target", () => {
+  assert.throws(() => resolveBackendBaseUrl({ NODE_ENV: "production", BACKEND_API_BASE_URL: "https://retired.example.com" }))
+  assert.throws(() => resolveBackendBaseUrl({ DESK_ENGINE_URL: "https://user:secret@example.com" }))
+  assert.throws(() => resolveBackendBaseUrl({ DESK_ENGINE_URL: "https://example.com/api" }))
+  assert.equal(resolveBackendBaseUrl({ DESK_ENGINE_URL: "http://engine.internal/" }), "http://engine.internal")
+  assert.equal(resolveBackendBaseUrl({ NODE_ENV: "development" }), "http://127.0.0.1:8000")
 })
 
-test("authenticated forwarding preserves bearer token, status, and sanitized errors", async () => {
+test("shared forwarding sends no bearer token and preserves sanitized errors", async () => {
   const previous = globalThis.fetch
-  process.env.BACKEND_API_BASE_URL = "https://api.example.com"
+  process.env.DESK_ENGINE_URL = "https://engine.internal"
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer private-token")
+    assert.equal(new Headers(init?.headers).get("Authorization"), null)
     return new Response(JSON.stringify({ detail: { error: "invalid", message: "Rejected", password: "secret" } }), { status: 422, headers: { "content-type": "application/json" } })
   }) as typeof fetch
-  await assert.rejects(() => forwardWithAuthorization("/api/me", "Bearer private-token"), (error: unknown) => {
+  await assert.rejects(() => forwardToWorkspace("/api/me"), (error: unknown) => {
     const serialized = JSON.stringify(error)
     assert.doesNotMatch(serialized, /private-token|secret/)
     return true

@@ -1,33 +1,24 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
-const root = process.cwd()
-const source = (path: string) => readFileSync(join(root, path), "utf8")
-
-test("authentication-sensitive onboarding pages are force-dynamic", () => {
-  for (const path of ["app/connect-tradelocker/page.tsx", "app/select-account/page.tsx", "app/login/page.tsx"]) {
+import { workspaceSession } from "../lib/afd/session"
+const source = (path: string) => readFileSync(path, "utf8")
+test("workspace has no login session or redirects", async () => {
+  assert.deepEqual(await workspaceSession(), { user: { name: "Shared workspace", email: null } })
+  for (const path of ["lib/afd/session.ts", "lib/afd/backend.ts", "app/api/afd/[...path]/route.ts", "app/api/assistant/stream/route.ts"]) {
+    assert.doesNotMatch(source(path), /auth0|getAccessToken|getSession|Bearer/)
+  }
+  assert.match(source("app/login/page.tsx"), /redirect\("\/dashboard"\)/)
+})
+test("onboarding remains dynamic and available without login", () => {
+  for (const path of ["app/connect-tradelocker/page.tsx", "app/select-account/page.tsx"]) {
     assert.match(source(path), /export const dynamic = ["']force-dynamic["']/)
   }
+  assert.match(source("app/connect-tradelocker/page.tsx"), /<BrokerConnectForm/)
 })
-
-test("session helper redirects unauthenticated users through Auth0 with returnTo", () => {
-  const session = source("lib/afd/session.ts")
-  assert.match(session, /await auth0\.getSession\(\)/)
-  assert.match(session, /\/auth\/login\?returnTo=\$\{encodeURIComponent\(returnTo\)\}/)
-})
-
-test("authenticated connect route requires a session and renders its onboarding form", () => {
-  const connect = source("app/connect-tradelocker/page.tsx")
-  assert.match(connect, /await requireSession\(["']\/connect-tradelocker["']\)/)
-  assert.match(connect, /<BrokerConnectForm/)
-})
-
-test("no session error is masked as an unauthenticated state", () => {
-  const files = [
-    "app/page.tsx", "app/login/page.tsx", "app/connect-tradelocker/page.tsx",
-    "app/select-account/page.tsx", "app/(desk)/layout.tsx", "lib/afd/backend.ts", "lib/afd/session.ts",
-  ]
-  for (const path of files) assert.doesNotMatch(source(path), /getSession\(\)\.catch/, path)
+test("engine is private in the same Vercel project", () => {
+  const config = JSON.parse(source("vercel.json"))
+  assert.equal(config.services.engine.root, "server")
+  assert.equal(config.services.dashboard.bindings[0].service, "engine")
+  assert.ok(config.rewrites.every((route: { destination: { service: string } }) => route.destination.service === "dashboard"))
 })

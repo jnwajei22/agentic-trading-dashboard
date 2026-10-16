@@ -1,0 +1,9 @@
+[project]
+name = "agentic-forex-desk"
+version = "0.1.0"
+description = "Native research and trading assistant backend for Agentic Trading Desk."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
