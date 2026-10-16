@@ -1,4 +1,5 @@
 "use client"
+import { useAssistantContext } from "@/lib/afd/assistant-context"
 
 import {useState} from "react"
 import {useRouter} from "next/navigation"
@@ -26,6 +27,7 @@ const initial=(capability:WeekendCapability="unknown",type="market_session"):Sch
 export function ScheduleManager({initialSchedules,profiles}:{initialSchedules:Schedule[];profiles:ProfileSummary[]}){
   const router=useRouter();const [dialog,setDialog]=useState<{schedule?:Schedule}|null>(null);const [builder,setBuilder]=useState<ScheduleBuilder>(()=>initial(weekendCapability(profiles[0])))
   const [profileId,setProfileId]=useState(profiles[0]?.public_id??"");const [busy,setBusy]=useState("");const [feedback,setFeedback]=useState("");const [dayError,setDayError]=useState("");const [customOverlap,setCustomOverlap]=useState(false);const [overlapSessions,setOverlapSessions]=useState<[string,string]>(["london","new_york"])
+  useAssistantContext({profile_ref:profileId,schedule_id:dialog?.schedule?.id??null})
   const selectedProfile=profiles.find(item=>item.public_id===profileId);const capability=weekendCapability(selectedProfile)
 
   function open(schedule?:Schedule){const selectedId=schedule?.profile_ref??profiles[0]?.public_id??"";const selected=profiles.find(item=>item.public_id===selectedId);const support=weekendCapability(selected);const recurrence=schedule?.recurrence;const type=recurrence?.type??"market_session";const base=initial(support,type);const days=recurrence?.days??base.days;const preset=presetForDays(days);setBuilder({...base,timezone:schedule?.timezone??base.timezone,days:[...days],dayPreset:preset,daysCustomized:Boolean(schedule&&preset!=="weekdays"),sessions:recurrence?.sessions??base.sessions,start:recurrence?.start_time??base.start,end:recurrence?.end_time??base.end,interval:recurrence?.interval_minutes??base.interval,time:recurrence?.times?.[0]??base.time,marketAware:recurrence?.market_aware??true,lateness:schedule?.maximum_lateness_seconds??base.lateness});setProfileId(selectedId);setDayError("");setCustomOverlap(Boolean(schedule?.recurrence?.sessions?.includes(OVERLAP_SESSION)));setOverlapSessions(["london","new_york"]);setDialog({schedule})}

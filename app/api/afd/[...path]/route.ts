@@ -8,6 +8,7 @@ type Context = { params: Promise<{ path: string[] }> }
 
 async function forwardAfdRequest(request: NextRequest, segments: string[], method: string) {
   const path = segments.join("/")
+  if (method !== "GET" && request.headers.get("origin") !== request.nextUrl.origin) return NextResponse.json({ error: "Origin not allowed." }, { status: 403 })
   if (!isAllowedAfdRoute(path, method)) return NextResponse.json({ error: "Not found" }, { status: 404 })
   try {
     const session = await auth0.getSession()

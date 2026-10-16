@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ArrowRight, Bell, Bot, Clock, Eye, HeartPulse, Lock, Palette, ShieldCheck, UserRoundCog } from "lucide-react"
+import { ArrowRight, Bell, Clock, Eye, HeartPulse, Lock, Palette, ShieldCheck, UserRoundCog } from "lucide-react"
 import { PageHeader } from "@/components/desk/page-header"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -7,7 +7,6 @@ const groups = [
   { title: "Trading", description: "Connections, accounts, and integrations used by the trading workspace.", items: [
     ["/settings/broker", ShieldCheck, "Trading Connections", "Connect, verify, refresh, or remove trading providers."],
     ["/settings/accounts", UserRoundCog, "Trading Accounts", "Manage primary account selection, nicknames, and availability."],
-    ["/settings/integrations/mcp", Bot, "ChatGPT & MCP", "Connect ChatGPT and manage authorized AI applications."],
   ]},
   { title: "Preferences", description: "Personalize notifications, appearance, timezone, and display formats.", items: [
     ["/settings/notifications", Bell, "Notifications", "Choose which supported events appear in the application."],
