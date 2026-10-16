@@ -8,6 +8,7 @@ from app.api.routes.platform import router as platform_router
 from app.api.routes.agent import router as agent_router
 from app.webhooks.tradingview import router as tradingview_router
 from app.config.settings import settings
+from app.storage.database import check_database, DatabaseUnavailable
 from app.storage.brokers import BrokerRepository, BrokerStorageError
 from app.storage.execution import ExecutionRepository
 from app.storage.schedules import ScheduleRepository
@@ -17,6 +18,7 @@ from app.jobs.autonomous_scheduler import AutonomousSchedulerWorker
 
 @asynccontextmanager
 async def lifespan(app_instance):
+    check_database()
     BrokerRepository(); ExecutionRepository(); ScheduleRepository()
     RuntimeSettingsRepository(); SignalIntentRepository()
     worker = AutonomousSchedulerWorker() if settings.autonomous_scheduler_embedded else None
@@ -30,6 +32,7 @@ async def lifespan(app_instance):
 
 app = FastAPI(title="Agentic Trading Desk", version="0.3.0", lifespan=lifespan)
 
+@app.exception_handler(DatabaseUnavailable)
 @app.exception_handler(BrokerStorageError)
 async def broker_storage_error_handler(request, exc):
     return JSONResponse(status_code=503, content={"detail": str(exc)})

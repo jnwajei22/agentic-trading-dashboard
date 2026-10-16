@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 
 
 def _now() -> str:
@@ -25,17 +26,18 @@ DEFAULT_FOREX_MAJORS = ["forex:EUR/USD", "forex:GBP/USD", "forex:USD/JPY",
 
 class UserExperienceRepository:
     def __init__(self, db_path: str | Path | None = None) -> None:
-        self.db_path = Path(db_path or settings.sqlite_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = storage_path(db_path)
+
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.db_path, timeout=30)
+        db = connect(self.db_path, timeout=30)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         return db
 
     def _initialize(self) -> None:
+        if using_postgres(): return
         with self._connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS user_preferences(
@@ -59,7 +61,7 @@ class UserExperienceRepository:
             row = db.execute("SELECT * FROM user_preferences WHERE user_sub=?", (user_sub,)).fetchone()
             if row is None:
                 now = _now()
-                db.execute("INSERT INTO user_preferences(user_sub,notification_json,updated_at) VALUES(?,?,?)",
+                db.execute("INSERT INTO user_preferences(user_sub,notification_json,updated_at) VALUES(?,?,?) ON CONFLICT(user_sub) DO NOTHING",
                            (user_sub, json.dumps(DEFAULT_NOTIFICATIONS), now))
                 row = db.execute("SELECT * FROM user_preferences WHERE user_sub=?", (user_sub,)).fetchone()
         result = dict(row)
@@ -74,14 +76,15 @@ class UserExperienceRepository:
             notifications = {**current["notifications"], **changes["notifications"]}
             updates["notification_json"] = json.dumps(notifications, separators=(",", ":"), sort_keys=True)
         updates["updated_at"] = _now()
-        assignments = ",".join(f"{key}=:{key}" for key in updates)
+        assignments = ",".join(f"{key}=?" for key in updates)
         with self._connect() as db:
-            db.execute(f"UPDATE user_preferences SET {assignments} WHERE user_sub=:user_sub",
-                       {**updates, "user_sub": user_sub})
+            db.execute(f"UPDATE user_preferences SET {assignments} WHERE user_sub=?",
+                       (*updates.values(), user_sub))
         return self.preferences(user_sub)
 
     def _ensure_default_watchlist(self, user_sub: str) -> None:
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM user_watchlists WHERE user_sub=?", (user_sub,)).fetchone():
                 return
             now = _now(); watchlist_id = f"watchlist_{uuid4().hex}"

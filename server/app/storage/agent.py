@@ -8,14 +8,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 
 class AgentStateError(ValueError):
     pass
 
 class AgentRepository:
     def __init__(self, db_path=None):
-        self.path = Path(db_path or settings.sqlite_path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = storage_path(db_path)
+
+        if using_postgres(): return
         with self.db() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS agent_conversations(
@@ -32,7 +34,7 @@ class AgentRepository:
 
     @contextmanager
     def db(self):
-        with sqlite3.connect(self.path, timeout=10) as db:
+        with connect(self.path, timeout=10) as db:
             db.row_factory = sqlite3.Row
             db.execute('PRAGMA foreign_keys=ON')
             yield db

@@ -1,8 +1,10 @@
+import os
+from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    app_env: str = "development"
+    app_env: str = Field(default_factory=lambda: "production" if os.getenv("VERCEL") == "1" else "development")
     app_timezone: str = "America/Chicago"
     public_base_url: str = "https://mcp.justinnwajei.com"
     frontend_origin: str = "https://app.agenticforexdesk.com"
@@ -12,6 +14,8 @@ class Settings(BaseSettings):
     active_encryption_key_version: str = "v1"
     allow_env_broker_fallback: bool = False
 
+    storage_backend: Literal["sqlite", "postgres"] = "sqlite"
+    supabase_db_url: str | None = Field(default=None, repr=False)
     database_url: str | None = None
     tradingview_webhook_secret: str | None = None
     workspace_owner_sub: str = Field(default="shared-workspace", min_length=1, pattern=r".*\S.*")

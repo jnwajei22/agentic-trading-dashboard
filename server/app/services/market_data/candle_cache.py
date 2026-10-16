@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 from app.models.market import Candle
 from app.services.market_data.history import (
     TIMEFRAME_DURATION_MS,
@@ -85,20 +86,21 @@ class DurableCandleCache:
         self, db_path: str | Path | None = None, *, max_entries: int | None = None,
         grace_seconds: int | None = None, clock: Callable[[], datetime] = _utcnow,
     ) -> None:
-        self.db_path = Path(db_path or settings.sqlite_path)
+        self.db_path = storage_path(db_path)
         self.max_entries = max_entries or settings.tradelocker_candle_cache_max_entries
         self.grace_seconds = (settings.tradelocker_candle_cache_grace_seconds
                               if grace_seconds is None else grace_seconds)
         self.clock = clock
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.db_path, timeout=30)
+        db = connect(self.db_path, timeout=30)
         db.row_factory = sqlite3.Row
         return db
 
     def _initialize(self) -> None:
+        if using_postgres(): return
         with self._connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS tradelocker_candle_cache(
                 user_id TEXT NOT NULL, connection_id TEXT NOT NULL, account_id TEXT NOT NULL,

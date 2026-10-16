@@ -1,3 +1,4 @@
+-- Historical design; current deployable schema: supabase/schema.sql.
 -- DESIGN ONLY. Not applied. SQLite remains authoritative.
 -- No import framework, migration tables, OAuth authorization state or runtime cutover.
 CREATE TABLE users (

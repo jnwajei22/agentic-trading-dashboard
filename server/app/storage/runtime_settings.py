@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 
 
 DEFAULT_RUNTIME_SETTINGS = {
@@ -14,28 +15,29 @@ DEFAULT_RUNTIME_SETTINGS = {
     "enabled_providers": ["tradelocker", "tradingview_chart"],
     "default_ai_model": "gpt-5.6", "default_decision_provider": "no_trade",
     "concurrency_limit": 4, "per_user_usage_limit": 1000,
-    "feature_flags": {}, "registration_policy": "authenticated",
+    "feature_flags": {}, "registration_policy": "shared_workspace",
 }
 
 
 class RuntimeSettingsRepository:
     def __init__(self, db_path: str | Path | None = None) -> None:
-        self.db_path = Path(db_path or settings.sqlite_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as db:
+        self.db_path = storage_path(db_path)
+
+        if using_postgres(): return
+        with connect(self.db_path) as db:
             db.execute("""CREATE TABLE IF NOT EXISTS platform_runtime_settings(
                 key TEXT PRIMARY KEY,value_json TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
 
     def get_all(self) -> dict[str, Any]:
         result = dict(DEFAULT_RUNTIME_SETTINGS)
-        with sqlite3.connect(self.db_path) as db:
+        with connect(self.db_path) as db:
             for key, value in db.execute("SELECT key,value_json FROM platform_runtime_settings"):
                 result[key] = json.loads(value)
         return result
 
     def update(self, values: dict[str, Any]) -> dict[str, Any]:
         allowed = DEFAULT_RUNTIME_SETTINGS.keys()
-        with sqlite3.connect(self.db_path) as db:
+        with connect(self.db_path) as db:
             for key, value in values.items():
                 if key not in allowed: raise ValueError(f"Unsupported runtime setting: {key}")
                 db.execute("""INSERT INTO platform_runtime_settings(key,value_json) VALUES(?,?)

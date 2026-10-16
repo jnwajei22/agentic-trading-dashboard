@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 from app.models.autonomous import ExecutionMode
 
 
@@ -19,17 +20,18 @@ class ExecutionRepository:
     """Durable, account-scoped autonomous-demo state."""
 
     def __init__(self, db_path: str | Path | None = None) -> None:
-        self.db_path = Path(db_path or settings.sqlite_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = storage_path(db_path)
+
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30)
+        connection = connect(self.db_path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _initialize(self) -> None:
+        if using_postgres(): return
         with self._connect() as db:
             db.executescript(
                 """
@@ -200,7 +202,7 @@ class ExecutionRepository:
         db.execute(
             """INSERT INTO autonomous_controls(user_sub,global_autonomous_kill_switch,
                demo_autonomous_enabled,live_autonomous_enabled,updated_at,updated_by,last_change_reason)
-               VALUES(?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_sub) DO NOTHING""",
             (user_sub, kill_switch, demo_enabled, False, now, "migration", "Legacy-safe control migration"),
         )
 
@@ -378,7 +380,7 @@ class ExecutionRepository:
                     (submission_id, preview_id, idempotency_key, fingerprint, now, now),
                 )
             return True, self.get_submission(preview_id=preview_id) or {}
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             existing = self.get_submission(preview_id=preview_id) or self.get_submission(idempotency_key=idempotency_key)
             return False, existing or {}
 
@@ -419,7 +421,7 @@ class ExecutionRepository:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(f"INSERT INTO autonomous_decision_runs({columns}) VALUES ({values})",encoded)
             return True,self.get_decision_run(record["user_sub"],record["id"]) or {}
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             with self._connect() as db:
                 row=db.execute("""SELECT * FROM autonomous_decision_runs WHERE user_sub=? AND profile_ref=?
                     AND (run_key=? OR state IN ('claimed','snapshotting','deciding','validating','previewing','submitting'))
@@ -492,7 +494,7 @@ class ExecutionRepository:
                 db.execute("""INSERT INTO demo_action_executions(id,preview_id,user_sub,idempotency_key,action_type,target_id,state,created_at)
                     VALUES(?,?,?,?,?,?,'claimed',?)""",(execution_id,preview_id,user_sub,idempotency_key,action_type,target_id,now))
             return True,self.get_action_execution(user_sub,execution_id) or {}
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             with self._connect() as db:
                 row=db.execute("SELECT * FROM demo_action_executions WHERE preview_id=? OR (user_sub=? AND idempotency_key=?)",(preview_id,user_sub,idempotency_key)).fetchone()
             return False,self._decode(row) if row else {}

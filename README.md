@@ -13,6 +13,7 @@ pnpm install
 python -m venv server/.venv
 server/.venv/bin/pip install -r server/requirements.txt
 cp server/.env.example server/.env
+# For local SQLite development, set STORAGE_BACKEND=sqlite in server/.env.
 cd server
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -31,9 +32,9 @@ Open `http://localhost:3000`. The local engine defaults to loopback port 8000. N
 
 `vercel.json` defines a Next.js dashboard and a private Python engine in the **same project** using Vercel Services (beta). All public ingress goes to Next.js. `DESK_ENGINE_URL` is injected by the private service binding; do not set it to the retired deployment. Next.js retains allowlisted API routes, same-origin mutation checks, server rendering, and unbuffered streaming. The engine has no public ingress rewrite and no browser CORS allowance.
 
-**Persistence remains an unresolved production prerequisite:** SQLite is still authoritative and needs a writable durable filesystem. A stateless Vercel function filesystem is not durable SQLite hosting. This configuration consolidates code/routing; it is not a claim that production storage or deployment has been verified. Neon has not been connected, PostgreSQL has not been applied, and SQLite data has not been migrated. Do not use ephemeral storage for broker connections, approvals, or trading ledgers.
+**Production persistence uses Supabase Postgres:** set `STORAGE_BACKEND=postgres` and the server-only `SUPABASE_DB_URL`, install the fresh private schema, and verify readiness. Production refuses SQLite. See [Supabase deployment instructions](docs/architecture/supabase-backend.md). Hosted deployment is pending account/project access; Neon remains untouched and no SQLite data is migrated.
 
-Embedded scheduling defaults off. Continuous scheduled runs need a persistent worker using the same durable database; the worker code is included under `server/` and has not been started.
+Embedded scheduling defaults off. Continuous scheduled runs need a persistent worker using the same Postgres database; the worker code is included under `server/` and has not been started.
 
 ## Verify
 
@@ -48,4 +49,4 @@ cd server
 
 Tests use mocks/temporary databases. The opt-in real broker test remains skipped. Do not run live execution to verify this change.
 
-See [consolidation details](docs/architecture/dashboard-consolidation.md) and the [PostgreSQL proposal](docs/architecture/postgresql-proposal.sql). The SQL is a design artifact only.
+See [consolidation details](docs/architecture/dashboard-consolidation.md) and the [current Postgres installation schema](supabase/schema.sql). The earlier PostgreSQL proposal is historical.

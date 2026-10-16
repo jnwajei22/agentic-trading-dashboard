@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.config.settings import settings
+from app.storage.database import check_database, DatabaseUnavailable
 from app.storage.schedules import ScheduleRepository
 
 router = APIRouter()
@@ -12,8 +13,12 @@ def health():
 
 @router.get("/ready")
 def ready():
+    try:
+        database = check_database()
+    except DatabaseUnavailable:
+        return JSONResponse(status_code=503, content={"status":"not_ready", "database":"unavailable"})
     if not settings.autonomous_scheduler_required_for_readiness:
-        return {"status":"ready"}
+        return {"status":"ready", "database": database["backend"]}
     scheduler=ScheduleRepository().worker_health()
     ready=scheduler["status"]=="healthy"
     return JSONResponse(status_code=200 if ready else 503,content={"status":"ready" if ready else "not_ready","scheduler":scheduler["status"]})

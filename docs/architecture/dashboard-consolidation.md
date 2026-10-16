@@ -1,3 +1,5 @@
+> Superseded for production persistence by [supabase-backend.md](supabase-backend.md). SQLite remains local-development only.
+
 # Dashboard consolidation
 
 This supersedes the earlier split-repository architecture. The user clarified that `agentic-trading-app` and its MCP deployment are retired and that the complete product belongs in `agentic-trading-dashboard`. No files in the retired repository were edited in this correction.

@@ -14,6 +14,7 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.config.settings import settings
+from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 from app.config.crypto import SecretDecryptionError, VersionedSecretCipher
 from app.models.execution_profile_v2 import ExecutionProfileV2, deep_merge, migrate_legacy_profile
 
@@ -59,18 +60,19 @@ def _ref(prefix: str) -> str:
 
 class BrokerRepository:
     def __init__(self, db_path: str | Path | None = None, secret: str | None = None) -> None:
-        self.db_path = Path(db_path or settings.sqlite_path)
+        self.db_path = storage_path(db_path)
         self.secret = secret if secret is not None else settings.broker_secret_key
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
+        connection = connect(self.db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _initialize(self) -> None:
+        if using_postgres(): return
         with self._connect() as db:
             migrated_single_connection = False
             db.execute("""CREATE TABLE IF NOT EXISTS users (
@@ -439,7 +441,7 @@ class BrokerRepository:
         nickname=alias.strip();alias=self._slug(nickname)
         with self._connect() as db:
             try: cur=db.execute("""UPDATE broker_accounts SET account_alias=?,nickname=? WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)""",(alias,nickname,account_ref,auth0_sub))
-            except sqlite3.IntegrityError: raise BrokerStorageError("That account alias is already in use.") from None
+            except IntegrityError: raise BrokerStorageError("That account alias is already in use.") from None
             return cur.rowcount==1
 
     def set_account_nickname(self, auth0_sub: str, account_ref: str, nickname: str | None) -> bool:
@@ -502,7 +504,7 @@ class BrokerRepository:
             try:
                 return db.execute("DELETE FROM broker_connections WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",
                                   (connection_ref,auth0_sub)).rowcount==1
-            except sqlite3.IntegrityError:
+            except IntegrityError:
                 raise BrokerStorageError("Delete bound strategies before removing this trading connection.") from None
 
     def list_profiles(self, auth0_sub: str) -> list[dict[str,Any]]:
@@ -660,7 +662,7 @@ class BrokerRepository:
             try: db.execute("""INSERT INTO execution_profiles(public_id,user_id,broker_account_id,strategy_template_id,name,execution_mode,
                 risk_json,allowed_instruments_json,session_rules_json,news_filter_enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (_ref("profile"),user["id"],account["id"],template["id"],name,execution_mode,json.dumps(policy),json.dumps(instruments),json.dumps(session_rules or {}),news_filter_enabled,now,now))
-            except sqlite3.IntegrityError: raise BrokerStorageError("That profile name is already in use.") from None
+            except IntegrityError: raise BrokerStorageError("That profile name is already in use.") from None
         return next(p for p in self.list_profiles(auth0_sub) if p["name"].lower()==name.lower())
 
     def update_profile(self, auth0_sub: str, profile_ref: str, *, name: str | None=None,
@@ -729,7 +731,7 @@ class BrokerRepository:
                     raise BrokerStorageError("Demo execution requires a verified demo account.")
                 if execution_mode == "demo_autonomous": raise BrokerStorageError("Demo Autonomous is not implemented.")
             try: cur=db.execute(f"UPDATE execution_profiles SET {','.join(assignments)} WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",values)
-            except sqlite3.IntegrityError: raise BrokerStorageError("That profile name is already in use.") from None
+            except IntegrityError: raise BrokerStorageError("That profile name is already in use.") from None
             return cur.rowcount==1
 
     def delete_profile(self, auth0_sub: str, profile_ref: str) -> bool:
