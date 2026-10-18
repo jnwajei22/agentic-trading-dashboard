@@ -15,6 +15,22 @@ from app.storage.brokers import BrokerRepository
 from app.services.tradelocker.accounts import BrokerAccountResolver
 SCOPES={'forex:read','forex:preview','forex:execute'}
 
+def test_sdk_parsed_outputs_can_be_replayed_as_api_inputs():
+    from openai.types.responses.parsed_response import ParsedResponseFunctionToolCall, ParsedResponseOutputMessage
+    from openai.types.responses.response_reasoning_item import ResponseReasoningItem
+    call=ParsedResponseFunctionToolCall(id='fc_test',call_id='call_test',name='list_execution_profiles',
+        arguments='{}',type='function_call',status='completed',parsed_arguments={})
+    message=ParsedResponseOutputMessage[dict](id='msg_test',type='message',role='assistant',status='completed',
+        content=[{'type':'output_text','text':'No profiles.','annotations':[],'parsed':{'count':0}}])
+    reasoning=ResponseReasoningItem(id='rs_test',type='reasoning',summary=[],encrypted_content='opaque')
+    replay=orchestration.response_input_item(call)
+    assert 'parsed_arguments' not in replay
+    assert replay['arguments']=='{}' and replay['call_id']=='call_test'
+    replay_message=orchestration.response_input_item(message)
+    assert 'parsed' not in replay_message['content'][0]
+    assert replay_message['content'][0]['text']=='No profiles.'
+    assert orchestration.response_input_item(reasoning)['encrypted_content']=='opaque'
+
 @pytest.mark.parametrize('mode,category,allowed',[
  ('research','read',True),('research','prepare',False),('research','execute',False),('research','autonomous',False),
  ('co_op','read',True),('co_op','prepare',True),('co_op','execute',True),('co_op','autonomous',False),
