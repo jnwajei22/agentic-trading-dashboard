@@ -6,7 +6,8 @@ export async function forwardToWorkspace<T>(path: string, init: RequestInit = {}
   try { baseUrl = resolveBackendBaseUrl() } catch { throw new AfdBackendError(503, "Backend API URL is not configured safely.", "backend_unavailable", {}, "configuration") }
   let response: Response
   try {
-    const timeout = AbortSignal.timeout(10_000)
+    // Allow the private Python service and pooled database to wake on a cold start.
+    const timeout = AbortSignal.timeout(30_000)
     response = await fetch(`${baseUrl}${path}`, {
       ...init,
       cache: "no-store",
