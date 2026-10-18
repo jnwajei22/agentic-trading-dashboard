@@ -88,8 +88,6 @@ type ShellProps = {
   children: React.ReactNode;
   user: { name?: string | null; email?: string | null };
   accounts: Account[];
-  backendOnline: boolean;
-  brokerReady: boolean;
 };
 export function AppShell({ children, accounts, ...props }: ShellProps) {
   return (
@@ -101,8 +99,6 @@ export function AppShell({ children, accounts, ...props }: ShellProps) {
 function ShellContent({
   children,
   user,
-  backendOnline,
-  brokerReady,
 }: Omit<ShellProps, "accounts">) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -118,28 +114,6 @@ function ShellContent({
         <div className="flex-1 overflow-y-auto px-4 py-5">
           <DeskNav collapsed={collapsed} />
         </div>
-        {!collapsed && (
-          <div className="mx-6 mb-3 space-y-2.5 border-t border-border/50 pt-5 text-[11px] text-muted-foreground">
-            <p className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  backendOnline ? "bg-emerald-500" : "bg-amber-500",
-                )}
-              />
-              {backendOnline ? "Desk connected" : "Desk unavailable"}
-            </p>
-            <p className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  brokerReady ? "bg-emerald-500" : "bg-muted-foreground",
-                )}
-              />
-              {brokerReady ? "Broker connected" : "Broker not connected"}
-            </p>
-          </div>
-        )}
         <Button
           variant="ghost"
           size="icon"

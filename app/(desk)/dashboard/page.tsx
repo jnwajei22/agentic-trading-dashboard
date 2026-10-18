@@ -106,14 +106,7 @@ export default async function DashboardPage() {
         eyebrow="Your workspace"
         title="Overview"
         description="A little clarity before your next move."
-        actions={
-          <StatusPill
-            label={
-              data.coreUnavailable ? "Connection interrupted" : "Desk connected"
-            }
-            tone={data.coreUnavailable ? "bad" : "good"}
-          />
-        }
+
       />
       {Object.keys(data.errors).length > 0 && (
         <div

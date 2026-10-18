@@ -1,19 +1,17 @@
 import { workspaceBackendClient } from "@/lib/afd/backend"
 import { workspaceSession } from "@/lib/afd/session"
-import type { Account, BrokerStatus } from "@/lib/afd/contracts"
+import type { Account } from "@/lib/afd/contracts"
 import { AppShell } from "@/components/desk/app-shell"
 
 export const dynamic = "force-dynamic"
 
 export default async function DeskLayout({ children }: { children: React.ReactNode }) {
   const session = await workspaceSession()
-  let accounts: Account[] = []; let status: BrokerStatus | null = null; let backendOnline = false
+  let accounts: Account[] = []
   try {
     const request = await workspaceBackendClient()
-    const [accountResult, statusResult] = await Promise.allSettled([request<{ accounts: Account[] }>("/api/trading/accounts"), request<BrokerStatus>("/api/broker/status")])
-    if (accountResult.status === "fulfilled") accounts = accountResult.value.accounts ?? []
-    if (statusResult.status === "fulfilled") status = statusResult.value
-    backendOnline = accountResult.status === "fulfilled" || statusResult.status === "fulfilled"
-  } catch { /* shell defaults to safe unavailable state */ }
-  return <AppShell user={session.user} accounts={accounts} backendOnline={backendOnline} brokerReady={status?.status === "ready"}>{children}</AppShell>
+    const result = await request<{ accounts: Account[] }>("/api/trading/accounts")
+    accounts = result.accounts ?? []
+  } catch { /* Account switching remains unavailable until accounts load. */ }
+  return <AppShell user={session.user} accounts={accounts}>{children}</AppShell>
 }

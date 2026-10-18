@@ -293,7 +293,6 @@ export function AssistantPanel() {
           </header>
           <div className="mx-6 flex items-center justify-between border-y border-border/50 py-3">
             <span className="flex items-center gap-2 text-xs">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               {modeLabel}
               <span className="text-muted-foreground">
                 {mode === "research"
