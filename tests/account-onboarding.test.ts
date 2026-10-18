@@ -19,7 +19,7 @@ test("multiple discovered TradeLocker accounts are all normalized for rendering"
 test("account selection occurs only from an explicit click", () => {
   const selector = readFileSync(join(process.cwd(), "app/select-account/selector.tsx"), "utf8")
   assert.match(selector, /discovered\.map/)
-  assert.match(selector, /onClick=\{\(\)=>void select\(account\)\}/)
+  assert.match(selector, /onClick=\{\(\)\s*=>\s*void select\(account\)\}/)
   assert.doesNotMatch(selector, /useEffect|select\(discovered\[0\]\)|select\(accounts\[0\]\)/)
   assert.match(selector, /router\.replace\(["']\/dashboard\?connected=1["']\)/)
 })
@@ -28,7 +28,7 @@ test("shell renders every durable account and labels only the explicit default",
   const provider = readFileSync(join(process.cwd(), "components/desk/account-provider.tsx"), "utf8")
   const switcher = readFileSync(join(process.cwd(), "components/desk/account-switcher.tsx"), "utf8")
   assert.match(switcher, /shown\.map/)
-  assert.match(switcher, /account\.is_default_analysis.*Primary/)
+  assert.match(switcher, /account\.is_default_analysis\s*&&\s*\([\s\S]*?Primary/)
   assert.match(provider, /normalizeAccountContext/)
   assert.doesNotMatch(provider, /is_default_analysis\) \?\? accounts\[0\]/)
 })

@@ -11,7 +11,7 @@ test("upcoming schedules resolve profile names and stack the next run",()=>{
   assert.match(dashboard,/item\.public_id === schedule\.profile_ref/)
   assert.match(dashboard,/profile\?\.name\?\.trim\(\)/)
   assert.match(dashboard,/"Execution profile"/)
-  assert.match(dashboard,/className="block rounded border p-3"/)
+  assert.match(dashboard,/when\(schedule\.next_run_at\)/)
   assert.doesNotMatch(dashboard,/>\{schedule\.profile_ref\}</)
 })
 

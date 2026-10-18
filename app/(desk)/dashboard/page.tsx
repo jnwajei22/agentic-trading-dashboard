@@ -1,71 +1,49 @@
-import Link from "next/link"
+import Link from "next/link";
 import {
+  Activity,
   AlertTriangle,
+  ArrowUpRight,
   Bot,
   CalendarClock,
-  ShieldAlert,
-  Waypoints,
-} from "lucide-react"
-
-import { workspaceBackendClient } from "@/lib/afd/backend"
-import { loadDashboardData } from "@/lib/afd/dashboard-data"
-import {
-  accountContext,
-  accountTitle,
-  formatEnum,
-} from "@/lib/afd/display"
-import { automationStatus } from "@/lib/afd/automation"
-
-import { EmptyState, PageHeader } from "@/components/desk/page-header"
-import { OnboardingChecklist } from "@/components/desk/onboarding-checklist"
-import { StatusPill } from "@/components/desk/status-pill"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-
-export const metadata = { title: "Dashboard" }
-
+  ShieldCheck,
+  Wallet,
+} from "lucide-react";
+import { workspaceBackendClient } from "@/lib/afd/backend";
+import { loadDashboardData } from "@/lib/afd/dashboard-data";
+import { accountContext, formatEnum } from "@/lib/afd/display";
+import { automationStatus } from "@/lib/afd/automation";
+import { PageHeader } from "@/components/desk/page-header";
+import { OnboardingChecklist } from "@/components/desk/onboarding-checklist";
+import { StatusPill } from "@/components/desk/status-pill";
+import { Button } from "@/components/ui/button";
+export const metadata = { title: "Overview" };
 const when = (value?: string) =>
   value
     ? new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
         timeStyle: "short",
       }).format(new Date(value))
-    : "Not recorded"
-
+    : "Not recorded";
 export default async function DashboardPage() {
-  let data
-
+  let data;
   try {
-    data = await loadDashboardData(await workspaceBackendClient())
+    data = await loadDashboardData(await workspaceBackendClient());
   } catch {
     data = await loadDashboardData(async () => {
-      throw new Error("unavailable")
-    })
+      throw new Error("unavailable");
+    });
   }
-
-  const selected = data.accounts.find(
-    account => account.is_default_analysis
-  )
-
-  const active = data.schedules.filter(
-    schedule => schedule.enabled
-  ).length
-
-  const setup =
-    !data.connections.length || data.status?.status !== "ready"
-
-  const automation = automationStatus(data)
-
+  const selected = data.accounts.find((account) => account.is_default_analysis);
+  const active = data.schedules.filter((schedule) => schedule.enabled);
+  const enabledProfiles = data.profiles.filter(
+    (profile) => profile.enabled,
+  ).length;
+  const automation = automationStatus(data);
   const steps = [
     {
       label: "Add a trading connection",
       href: "/connect-tradelocker?new=1",
-      complete: data.connections.some(connection => connection.enabled),
+      complete: data.connections.some((connection) => connection.enabled),
     },
     {
       label: "Select a trading account",
@@ -82,8 +60,8 @@ export default async function DashboardPage() {
       href: data.profiles[0]
         ? `/autonomous/${data.profiles[0].public_id}`
         : "/autonomous",
-      complete: data.profiles.some(profile =>
-        Boolean(profile.profile_v2?.risk_policy)
+      complete: data.profiles.some((profile) =>
+        Boolean(profile.profile_v2?.risk_policy),
       ),
     },
     {
@@ -95,353 +73,333 @@ export default async function DashboardPage() {
       label: "Run a demo test",
       href: "/autonomous",
       complete: data.runs.some(
-        run =>
-          run.dry_run ||
-          run.trigger_reason === "demo_test"
+        (run) => run.dry_run || run.trigger_reason === "demo_test",
       ),
     },
+  ];
+  const activity = [
+    ...data.runs.slice(0, 5).map((run) => ({
+      id: run.run_id,
+      title: formatEnum(run.outcome),
+      detail: run.chosen_instrument ?? "Autonomous decision",
+      time: run.started_at,
+    })),
+    ...data.executions.slice(0, 5).map((item) => ({
+      id: item.id,
+      title: formatEnum(item.action_type ?? item.symbol ?? "Demo execution"),
+      detail: formatEnum(item.state ?? item.result),
+      time: item.created_at,
+    })),
   ]
-
+    .sort(
+      (a, b) =>
+        (Date.parse(b.time ?? "") || 0) - (Date.parse(a.time ?? "") || 0),
+    )
+    .slice(0, 5);
+  const outcomeTotal = Object.values(data.daily.outcomes).reduce(
+    (sum, count) => sum + Number(count),
+    0,
+  );
   return (
     <div className="space-y-7">
       <PageHeader
-        eyebrow="Operations desk"
-        title="Trading command center"
-        description="Broker accounts, profiles, schedules, and autonomous safety state."
+        eyebrow="Your workspace"
+        title="Overview"
+        description="A little clarity before your next move."
         actions={
           <StatusPill
             label={
-              data.coreUnavailable
-                ? "Backend degraded"
-                : "Backend connected"
+              data.coreUnavailable ? "Connection interrupted" : "Desk connected"
             }
             tone={data.coreUnavailable ? "bad" : "good"}
           />
         }
       />
-
       {Object.keys(data.errors).length > 0 && (
         <div
           role="status"
-          className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
+          className="flex gap-3 rounded-2xl bg-amber-500/10 px-5 py-4 text-sm"
         >
-          <AlertTriangle className="h-5 w-5 shrink-0" />
-
-          <div>
-            <strong>Some operational data is unavailable.</strong>
-
-            <p className="text-muted-foreground">
-              Loaded sections are preserved; unavailable actions remain
-              blocked.
-            </p>
-          </div>
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <p>
+            Some operational data is unavailable.{" "}
+            <span className="text-muted-foreground">
+              Loaded sections are preserved; unavailable actions remain blocked.
+            </span>
+          </p>
         </div>
       )}
-
-      {setup && !data.coreUnavailable && (
-        <div className="flex flex-col justify-between gap-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 sm:flex-row sm:items-center">
-          <div>
-            <strong>Trading setup required</strong>
-
-            <p className="text-sm text-muted-foreground">
-              Add a trading connection and explicitly select a primary
-              account.
-            </p>
-          </div>
-
-          <Button asChild>
-            <Link
-              prefetch={false}
-              href={
-                data.connections.length
-                  ? "/select-account"
-                  : "/connect-tradelocker"
-              }
-            >
-              {data.connections.length
-                ? "Select account"
-                : "Add Trading Connection"}
-            </Link>
-          </Button>
-        </div>
-      )}
-
-      <OnboardingChecklist steps={steps} />
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section
+        aria-label="Workspace summary"
+        className="grid grid-cols-2 divide-border/50 rounded-3xl bg-card shadow-sm ring-1 ring-border/50 sm:grid-cols-3 sm:divide-x"
+      >
         <Metric
-          icon={Waypoints}
+          className="col-span-2 border-b border-border/50 sm:col-span-1 sm:border-b-0"
+          icon={Wallet}
           label="Primary account"
-          value={selected ? accountTitle(selected) : "Not selected"}
+          value={
+            selected
+              ? selected.nickname ||
+                `${selected.broker_name || "Trading"} #${selected.account_number}`
+              : "No account selected"
+          }
           detail={
             selected
-              ? `${accountContext(selected)} · Default`
-              : `${data.accounts.length} discovered · Trading blocked`
+              ? accountContext(selected)
+              : "Connect your broker to get started"
           }
         />
-
         <Metric
+          className="border-r border-border/50 sm:border-r-0"
           icon={Bot}
-          label="Enabled profiles"
-          value={String(
-            data.profiles.filter(profile => profile.enabled).length
-          )}
-          detail={`${data.profiles.length} total`}
+          label="Active strategies"
+          value={String(enabledProfiles)}
+          detail={`${data.profiles.length} execution profiles configured`}
         />
-
-        <Metric
-          icon={ShieldAlert}
-          label="Global kill switch"
-          value={
-            data.controls.global_autonomous_kill_switch
-              ? "Enabled"
-              : "Disabled"
-          }
-          detail={
-            data.controls.global_autonomous_kill_switch
-              ? "New submissions blocked"
-              : "Backend confirmed off"
-          }
-        />
-
         <Metric
           icon={CalendarClock}
-          label="Active schedules"
-          value={String(active)}
-          detail={`${data.schedules.length} configured`}
+          label="Scheduled sessions"
+          value={String(active.length)}
+          detail={`${data.schedules.length} schedules configured`}
         />
       </section>
-
-      <section className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Today&apos;s outcomes</CardTitle>
-          </CardHeader>
-
-          <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {Object.entries(data.daily.outcomes).map(([key, count]) => (
-              <div
-                key={key}
-                className="rounded-lg border p-3"
-              >
-                <p className="text-xs text-muted-foreground">
-                  {formatEnum(key)}
+      <OnboardingChecklist steps={steps} />
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(280px,1fr)]">
+        <div className="space-y-6">
+          <section
+            className="desk-surface p-6 sm:p-8"
+            aria-labelledby="today-heading"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="desk-eyebrow">Daily snapshot</p>
+                <h2
+                  id="today-heading"
+                  className="mt-2 text-xl font-semibold tracking-tight"
+                >
+                  Today at your desk
+                </h2>
+              </div>
+              <span className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/10 text-emerald-600">
+                <Activity className="h-5 w-5" />
+              </span>
+            </div>
+            {outcomeTotal === 0 ? (
+              <div className="py-10 sm:py-12">
+                <p className="text-3xl font-medium tracking-tight sm:text-4xl">
+                  A clear slate.
                 </p>
-
-                <p className="text-2xl font-semibold">
-                  {count}
+                <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
+                  No outcomes recorded today. Your decisions and executions will
+                  appear here as your desk gets to work.
                 </p>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Automation Status</CardTitle>
-          </CardHeader>
-
-          <CardContent>
-            <StatusPill
-              label={automation.state}
-              tone={
-                automation.state === "Ready"
-                  ? "good"
-                  : automation.state === "Paused"
-                    ? "neutral"
-                    : "warn"
-              }
-            />
-
-            <p className="mt-4 text-sm text-muted-foreground">
-              {automation.message}
-            </p>
-
-            {automation.state === "No Enabled Strategies" && (
-              <Button
-                asChild
-                className="mt-4"
-                size="sm"
-              >
-                <Link href="/autonomous?create=1">
-                  Create Strategy
-                </Link>
-              </Button>
+            ) : (
+              <div className="py-9">
+                <p className="text-4xl font-medium tabular-nums">
+                  {outcomeTotal}
+                  <span className="ml-3 text-sm font-normal text-muted-foreground">
+                    outcomes today
+                  </span>
+                </p>
+              </div>
             )}
-
-            {automation.state === "No Schedule" && (
-              <Button
-                asChild
-                className="mt-4"
-                size="sm"
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-5 border-t border-border/50 pt-5 sm:grid-cols-6">
+              {Object.entries(data.daily.outcomes).map(([key, count]) => (
+                <div key={key}>
+                  <dt className="text-[11px] text-muted-foreground">
+                    {formatEnum(key)}
+                  </dt>
+                  <dd className="mt-2 text-lg font-medium tabular-nums">
+                    {count}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <section
+            className="desk-surface p-6 sm:p-8"
+            aria-labelledby="activity-heading"
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <h2 id="activity-heading" className="text-base font-semibold">
+                Recent activity
+              </h2>
+              <Link
+                href="/activity"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
               >
-                <Link href="/schedules?create=1">
-                  Create Schedule
-                </Link>
-              </Button>
+                View all
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+            {activity.length ? (
+              <div className="divide-y divide-border/50">
+                {activity.map((item) => (
+                  <Link
+                    key={item.id}
+                    href="/activity"
+                    className="flex items-center gap-4 py-4"
+                  >
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted">
+                      <Activity className="h-4 w-4 text-muted-foreground" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <strong className="block text-sm font-medium">
+                        {item.title}
+                      </strong>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {item.detail}
+                      </span>
+                    </span>
+                    <time className="text-right text-[11px] text-muted-foreground">
+                      {when(item.time)}
+                    </time>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-4 py-5">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-muted">
+                  <Activity className="h-5 w-5 text-muted-foreground" />
+                </span>
+                <div>
+                  <p className="text-sm font-medium">Nothing to catch up on</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Autonomous runs and demo executions will appear here.
+                  </p>
+                </div>
+              </div>
             )}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-3">
-        <ListCard title="Recent autonomous runs">
-          {data.runs.slice(0, 5).map(run => (
-            <Link
-              href="/activity"
-              key={run.run_id}
-              className="flex justify-between gap-4 rounded border p-3"
-            >
-              <span className="min-w-0">
-                <strong className="block text-sm">
-                  {formatEnum(run.outcome)}
-                </strong>
-
-                <small className="block truncate">
-                  {run.chosen_instrument ?? "No instrument selected"}
-                </small>
+          </section>
+        </div>
+        <div className="space-y-6">
+          <section
+            className="desk-surface p-6 sm:p-7"
+            aria-labelledby="safety-heading"
+          >
+            <span className="mb-5 grid h-11 w-11 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600">
+              <ShieldCheck className="h-5 w-5" />
+            </span>
+            <h2 id="safety-heading" className="text-base font-semibold">
+              Safety & automation
+            </h2>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">
+                Global kill switch
               </span>
-
-              <small className="shrink-0 text-right text-muted-foreground">
-                {when(run.started_at)}
-              </small>
-            </Link>
-          ))}
-
-          {!data.runs.length && (
-            <EmptyState
-              title="No autonomous runs"
-              description="Runs appear after a scheduled decision."
-            />
-          )}
-        </ListCard>
-
-        <ListCard title="Recent demo executions">
-          {data.executions.slice(0, 5).map(item => (
-            <Link
-              href="/activity"
-              key={item.id}
-              className="block rounded border p-3"
+              <StatusPill
+                label={
+                  data.controls.global_autonomous_kill_switch
+                    ? "Enabled"
+                    : "Disabled"
+                }
+                tone={
+                  data.controls.global_autonomous_kill_switch
+                    ? "warn"
+                    : "neutral"
+                }
+              />
+            </div>
+            <div className="mt-5 border-t border-border/50 pt-5">
+              <p className="text-sm font-medium">{automation.state}</p>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                {automation.message}
+              </p>
+            </div>
+            <Button
+              asChild
+              variant="ghost"
+              className="mt-5 h-auto justify-start px-0 text-xs hover:bg-transparent"
             >
-              <strong className="block truncate text-sm">
-                {formatEnum(
-                  item.action_type ??
-                    item.symbol ??
-                    "Demo execution"
-                )}
-              </strong>
-
-              <small className="mt-1 block text-muted-foreground">
-                {formatEnum(item.state ?? item.result)} ·{" "}
-                {when(item.created_at)}
-              </small>
+              <Link href="/autonomous">
+                Review automation
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
+          </section>
+          <section
+            className="desk-surface p-6 sm:p-7"
+            aria-labelledby="schedule-heading"
+          >
+            <div className="flex items-center justify-between">
+              <h2 id="schedule-heading" className="text-base font-semibold">
+                Coming up
+              </h2>
+              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+            </div>
+            {active.length ? (
+              <div className="mt-4 divide-y divide-border/50">
+                {active.slice(0, 4).map((schedule) => {
+                  const profile = data.profiles.find(
+                    (item) => item.public_id === schedule.profile_ref,
+                  );
+                  const name = profile?.name?.trim();
+                  const profileName =
+                    name && !name.toLowerCase().startsWith("profile_")
+                      ? name
+                      : "Execution profile";
+                  return (
+                    <Link
+                      key={schedule.id}
+                      href="/schedules"
+                      className="block py-3"
+                    >
+                      <p className="text-sm font-medium">{profileName}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {when(schedule.next_run_at)}
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-6">
+                <p className="text-sm font-medium">Your calendar is open</p>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  No active schedules. Set a rhythm when your strategy is ready.
+                </p>
+              </div>
+            )}
+            <Link
+              href="/schedules"
+              className="flex items-center gap-1 text-xs text-emerald-700 hover:underline dark:text-emerald-300"
+            >
+              Manage schedules
+              <ArrowUpRight className="h-3.5 w-3.5" />
             </Link>
-          ))}
-
-          {!data.executions.length && (
-            <EmptyState
-              title="No demo executions"
-              description="Demo executions appear after a successful demo test."
-            />
-          )}
-        </ListCard>
-
-        <ListCard title="Upcoming schedules">
-          {data.schedules
-            .filter(schedule => schedule.enabled)
-            .slice(0, 5)
-            .map(schedule => {
-              const profile = data.profiles.find(
-                item => item.public_id === schedule.profile_ref
-              )
-
-              const rawProfileName = profile?.name?.trim()
-
-              const profileName =
-                rawProfileName &&
-                !rawProfileName.toLowerCase().startsWith("profile_")
-                  ? rawProfileName
-                  : "Execution profile"
-
-              return (
-                <Link
-                  href="/schedules"
-                  key={schedule.id}
-                  className="block rounded border p-3"
-                >
-                  <strong className="block truncate text-sm">
-                    {profileName}
-                  </strong>
-
-                  <small className="mt-1 block text-muted-foreground">
-                    {when(schedule.next_run_at)}
-                  </small>
-                </Link>
-              )
-            })}
-
-          {!active && (
-            <EmptyState
-              title="No active schedules"
-              description="Create a schedule for an execution profile."
-            />
-          )}
-        </ListCard>
-      </section>
+          </section>
+        </div>
+      </div>
     </div>
-  )
+  );
 }
-
 function Metric({
   icon: Icon,
+  className = "",
   label,
   value,
   detail,
 }: {
-  icon: typeof Bot
-  label: string
-  value: string
-  detail: string
+  icon: typeof Bot;
+  className?: string;
+  label: string;
+  value: string;
+  detail: string;
 }) {
   return (
-    <Card>
-      <CardContent className="flex justify-between p-5">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {label}
-          </p>
-
-          <p className="mt-2 text-xl font-semibold">
-            {value}
-          </p>
-
-          <p className="text-xs text-muted-foreground">
-            {detail}
-          </p>
-        </div>
-
-        <Icon className="h-4 w-4" />
-      </CardContent>
-    </Card>
-  )
-}
-
-function ListCard({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-
-      <CardContent className="space-y-3">
-        {children}
-      </CardContent>
-    </Card>
-  )
+    <div className={`min-w-0 p-5 sm:p-7 ${className}`}>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <p
+        className="mt-4 truncate text-2xl font-medium tracking-tight tabular-nums"
+        title={value}
+      >
+        {value}
+      </p>
+      <p className="mt-2 truncate text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
 }

@@ -28,7 +28,7 @@ test("FRED is consolidated into summary and the instrument-aware calendar",()=>{
 })
 test("dashboard hides worker identifiers behind automation status",()=>{
   const dashboard=source("app/(desk)/dashboard/page.tsx")
-  assert.match(dashboard,/Automation Status/);assert.doesNotMatch(dashboard,/worker_id|Worker health/)
+  assert.match(dashboard,/automation\.state/);assert.doesNotMatch(dashboard,/worker_id|Worker health/)
 })
 test("profile and schedule editors use structured customer controls",()=>{
   const profile=source("app/(desk)/autonomous/[profileId]/profile-editor.tsx");const schedules=source("app/(desk)/schedules/schedule-manager.tsx")
