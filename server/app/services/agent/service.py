@@ -15,6 +15,16 @@ Never claim an order executed without a successful execution result. Distinguish
 TradeLocker is execution-price authority; Finnhub and FRED supply separate context.
 Do not request secrets. Missing capabilities or stale data must be reported plainly.'''
 
+def response_input_item(item):
+    """Keep wire output while excluding the SDK's local parsing annotations."""
+    value=item.model_dump(mode='json')
+    if value.get('type')=='function_call':
+        value.pop('parsed_arguments',None)
+    elif value.get('type')=='message':
+        for part in value.get('content',[]):
+            part.pop('parsed',None)
+    return value
+
 class ResponsesProvider:
     async def stream(self, items, schemas):
         from openai import AsyncOpenAI
@@ -28,7 +38,7 @@ class ResponsesProvider:
                     elif event.type=='response.refusal.delta':yield {'type':'delta','text':event.delta}
                 response=await stream.get_final_response()
                 if response.status!='completed':raise RuntimeError('incomplete_response')
-                yield {'type':'response','items':[item.model_dump(mode='json') for item in response.output]}
+                yield {'type':'response','items':[response_input_item(item) for item in response.output]}
 
 class AgentService:
     def __init__(self,repo=None,provider=None):
@@ -153,7 +163,8 @@ class AgentService:
             # Log only diagnostic codes, never request bodies, API keys or database URLs.
             logger.warning('assistant_turn_failed conversation_id=%s type=%s status=%s code=%s param=%s reason=%s',
                 key,type(exc).__name__,getattr(exc,'status_code',None),getattr(exc,'code',None),
-                getattr(exc,'param',None),str(exc) if type(exc) is RuntimeError else None)
+                getattr(exc,'param',None),str(exc) if type(exc) is RuntimeError and str(exc) in {
+                    'assistant_not_configured','incomplete_response','tool_budget_exceeded'} else None)
             self.repo.add(key,'assistant',{'text':''.join(text),'interrupted':True})
             yield {'type':'error','code':'assistant_unavailable','message':'The assistant could not finish. Check configuration or try again. Trading results must be checked before retrying an action.'}
         finally:self.repo.release(key)
