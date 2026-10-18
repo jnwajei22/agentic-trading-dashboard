@@ -3,6 +3,20 @@ name = "agentic-forex-desk"
 version = "0.1.0"
 description = "Native research and trading assistant backend for Agentic Trading Desk."
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "httpx",
+    "sqlalchemy",
+    "psycopg2-binary==2.9.13",
+    "PyJWT[crypto]>=2.9,<3",
+    "openai==2.46.0",
+    "cryptography",
+    "tzdata",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
