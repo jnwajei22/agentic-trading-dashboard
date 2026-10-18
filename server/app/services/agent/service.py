@@ -149,8 +149,11 @@ class AgentService:
         except asyncio.CancelledError:
             self.repo.add(key,'assistant',{'text':''.join(text),'interrupted':True})
             raise
-        except Exception:
-            logger.warning('assistant_turn_failed conversation_id=%s',key)
+        except Exception as exc:
+            # Log only diagnostic codes, never request bodies, API keys or database URLs.
+            logger.warning('assistant_turn_failed conversation_id=%s type=%s status=%s code=%s param=%s reason=%s',
+                key,type(exc).__name__,getattr(exc,'status_code',None),getattr(exc,'code',None),
+                getattr(exc,'param',None),str(exc) if type(exc) is RuntimeError else None)
             self.repo.add(key,'assistant',{'text':''.join(text),'interrupted':True})
             yield {'type':'error','code':'assistant_unavailable','message':'The assistant could not finish. Check configuration or try again. Trading results must be checked before retrying an action.'}
         finally:self.repo.release(key)
