@@ -26,7 +26,7 @@ export function MarketChart({ symbol, label }: { symbol: string; label: string }
     return () => { script.onerror = null; target.replaceChildren() }
   }, [symbol, resolvedTheme, reload])
   return <div>
-    <div ref={container} aria-label={`${label} price chart`} className="tradingview-widget-container h-[420px] w-full overflow-hidden rounded-2xl sm:h-[500px]" />
+    <div className="h-[420px] sm:h-[500px]"><div ref={container} aria-label={`${label} price chart`} className="tradingview-widget-container h-full w-full overflow-hidden rounded-2xl" /></div>
     {failed && <p role="alert" className="mt-3 text-xs text-muted-foreground">The chart could not connect. Check your connection and try reconnecting.</p>}
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
       <p><a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">Chart by TradingView</a> · Updates with the available market feed</p>
