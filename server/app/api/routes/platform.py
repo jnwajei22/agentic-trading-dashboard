@@ -596,7 +596,7 @@ async def _broker_chart_events(request,context,owner,canonical_id,symbol,timefra
         while time.monotonic()<deadline and not await request.is_disconnected():
             started=time.monotonic()
             try:
-                async with asyncio.timeout(min(20,deadline-started)):
+                async with asyncio.timeout(min(45 if count==0 else 20,deadline-started)):
                     snapshot=await _broker_chart_snapshot(client,symbol,canonical_id,timeframe,count%12==0)
                 snapshot["transport"]="sampled_sse"
                 snapshot["sample_ms"]=round((time.monotonic()-started)*1000)

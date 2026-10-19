@@ -20,6 +20,7 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
     let stopped = false
     let reconnect: ReturnType<typeof setTimeout> | undefined
     let lastMessage = Date.now()
+    let received = false
     setData(null); setLoading(true); setError("")
     function connect() {
       clearTimeout(reconnect)
@@ -33,7 +34,7 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
         try {
           const next = JSON.parse((event as MessageEvent).data) as ChartData
           if (next.instrument !== instrument || next.timeframe !== timeframe) return
-          lastMessage = Date.now()
+          lastMessage = Date.now(); received = true
           setData(previous => ({ ...next, candles: mergeChartCandles(previous?.candles ?? [], next.candles) }))
           setError(""); setLoading(false)
         } catch { setError("The chart received an invalid update. Reconnecting…"); connect() }
@@ -48,7 +49,7 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
     }
     // Recover stalled connections even when the browser never emits an error.
     const watchdog = setInterval(() => {
-      if (!document.hidden && Date.now() - lastMessage > 35000) connect()
+      if (!document.hidden && Date.now() - lastMessage > (received ? 35000 : 70000)) connect()
     }, 5000)
     connect()
     document.addEventListener("visibilitychange", resume)
