@@ -443,7 +443,7 @@ async def _execution_market_context(user_sub:str,account_alias:str,canonical_id:
         async with TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
             server=context["server"],account_id=context["account_id"],account_number=context["account_number"]) as client:
             raw=await client.get_quote(symbol)
-        bid=_quote_number(raw,{"bid","bidprice"});ask=_quote_number(raw,{"ask","askprice"})
+        bid=_quote_number(raw,{"bid","bidprice","bp"});ask=_quote_number(raw,{"ask","askprice","ap"})
         price=_quote_number(raw,{"price","last","lastprice","mid","close"})
         if price is None and bid is not None and ask is not None:price=(bid+ask)/2
         return ({"price":price,"bid":bid,"ask":ask,"timestamp":datetime.now(timezone.utc).isoformat(),

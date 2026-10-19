@@ -25,7 +25,7 @@ test("all Markets provider attribution is rendered through Source",()=>{
   const markets=source("app/(desk)/markets/workspace.tsx")
   assert.match(markets,/normalizeSourceProviders\(label\)/)
   assert.match(markets,/Source: \{providers\}/)
-  assert.match(markets,/item\.source_name\?\?"finnhub"/)
+  assert.match(markets,/item\.source_name\s*\?\?\s*"Finnhub"/)
   assert.match(markets,/label=\{driver\.source\}/)
   assert.match(markets,/label=\{item\.source\}/)
   assert.match(markets,/label=\{series\.source\}/)

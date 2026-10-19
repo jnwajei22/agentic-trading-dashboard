@@ -13,7 +13,7 @@ test("markets are provider-aggregated and TradeLocker is optional",()=>{
   const page=source("app/(desk)/markets/page.tsx");const workspace=source("app/(desk)/markets/workspace.tsx")
   for(const route of ["markets/news","markets/calendar"])assert.match(page,new RegExp(route))
   assert.doesNotMatch(page,/markets\/macro/)
-  assert.match(workspace,/markets\/.*\/summary/);assert.match(workspace,/TradingView/);assert.match(workspace,/MarketSummary/)
+  assert.match(workspace,/markets\/.*\/summary/);assert.match(workspace,/MarketChart/);assert.match(workspace,/MarketSummary/)
 })
 test("FRED is consolidated into summary and the instrument-aware calendar",()=>{
   const workspace=source("app/(desk)/markets/workspace.tsx")

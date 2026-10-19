@@ -53,7 +53,7 @@ test("markets use durable watchlists and remain independent from trading account
   const workspace = source("app/(desk)/markets/workspace.tsx")
   assert.match(page, /watchlists/)
   assert.match(workspace, /Create watchlist|saveItems|pinned/)
-  assert.match(workspace, /TradingView visual context; never authoritative for execution/)
+  assert.match(source("components/desk/market-chart.tsx"), /Chart prices may differ from your broker’s execution quotes/)
   assert.doesNotMatch(workspace, /No TradeLocker account/)
 })
 
