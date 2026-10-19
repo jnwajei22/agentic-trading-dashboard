@@ -49,11 +49,11 @@ async def test_broker_chart_preserves_candles_and_does_not_invent_quote_time(fee
 
 
 @pytest.mark.asyncio
-async def test_quote_refresh_does_not_refetch_candles(feed):
+async def test_live_refresh_fetches_a_small_forming_candle_tail(feed):
     calls, _ = feed
     result = await platform.broker_market_chart("forex:EUR/USD", "mine", history=False, claims={"sub":"owner"})
-    assert result["candles"] == []
-    assert not any(call[0] == "candles" for call in calls)
+    assert result["candles"]
+    assert ("candles", "EURUSD", "5m", 3) in calls
 
 
 @pytest.mark.asyncio

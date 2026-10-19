@@ -544,14 +544,15 @@ async def broker_market_chart(instrument:str,account_alias:str,
                        "ask":ask if ask is not None and math.isfinite(ask) else None,"timestamp":quote_time}
         except (TradeLockerError,ValueError,OverflowError,OSError):
             warnings.append("The broker quote could not be refreshed.")
-        if history:
-            try:
-                result=await client.get_candles(symbol,timeframe,120,minimum_usable=1)
-                candles=[row.model_dump(mode="json") for row in result.candles[-120:]
-                         if all(math.isfinite(value) for value in (row.open,row.high,row.low,row.close))]
-                if result.cache_hit and not result.cache_fresh:warnings.append("Showing cached broker candles.")
-            except TradeLockerError:
-                warnings.append("Broker candle history is temporarily unavailable.")
+        try:
+            # The short live tail includes the forming bar. A quote-only refresh
+            # would move the price marker while leaving the plotted OHLC frozen.
+            result=await client.get_candles(symbol,timeframe,120 if history else 3,minimum_usable=1)
+            candles=[row.model_dump(mode="json") for row in result.candles[-120:]
+                     if all(math.isfinite(value) for value in (row.open,row.high,row.low,row.close))]
+            if result.cache_hit and not result.cache_fresh:warnings.append("Showing cached broker candles.")
+        except TradeLockerError:
+            warnings.append("Broker candle history is temporarily unavailable.")
     if not quote and not candles:raise HTTPException(status_code=502,detail="The broker chart feed is unavailable. Try reconnecting shortly.")
     return {"instrument":canonical.canonical_id,"timeframe":timeframe,"source":"TradeLocker",
             "checked_at":datetime.now(timezone.utc).isoformat(),"quote":quote,"candles":candles,"warnings":warnings}

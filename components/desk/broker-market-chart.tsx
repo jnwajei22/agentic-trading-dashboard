@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { RotateCw } from "lucide-react"
 import { browserAfdFetch } from "@/lib/afd/browser-client"
+import { mergeChartCandles } from "@/lib/afd/chart-candles"
 import { Button } from "@/components/ui/button"
 
 type Candle = { timestamp: number; open: number; high: number; low: number; close: number }
@@ -23,16 +24,16 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
     async function refresh() {
       clearTimeout(timer)
       if (running || stopped) return
-      if (document.hidden) { timer = setTimeout(refresh, 10000); return }
+      if (document.hidden) { timer = setTimeout(refresh, 5000); return }
       running = true
       try {
-        const params = new URLSearchParams({ instrument, account_alias: accountAlias, timeframe, history: String(count % 6 === 0) })
+        const params = new URLSearchParams({ instrument, account_alias: accountAlias, timeframe, history: String(count % 12 === 0) })
         const next = await browserAfdFetch<ChartData>(`markets/chart?${params}`, { signal: controller.signal })
         if (stopped) return
-        setData(previous => ({ ...next, candles: next.candles.length ? next.candles : previous?.candles ?? [] }))
+        setData(previous => ({ ...next, candles: mergeChartCandles(previous?.candles ?? [], next.candles) }))
         setError(""); count++
       } catch { if (!stopped) setError("The broker feed paused. Retrying automatically.") }
-      finally { running = false; if (!stopped) { setLoading(false); timer = setTimeout(refresh, 10000) } }
+      finally { running = false; if (!stopped) { setLoading(false); timer = setTimeout(refresh, 5000) } }
     }
     const resume = () => { if (!document.hidden) void refresh() }
     void refresh()
@@ -55,8 +56,8 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
     <div className="h-[340px] sm:h-[420px]" aria-busy={loading}>
       {pending?.candles.length ? <CandlePlot candles={pending.candles} price={quote?.price} label={label} precision={precision} /> : <div className="flex h-full items-center justify-center rounded-2xl bg-muted/30 p-6 text-center text-sm text-muted-foreground">{loading ? "Loading broker candles…" : error || "The broker returned no candle history. Its latest quote is shown above."}</div>}
     </div>
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground"><p>{error || (missed ? "Waiting for the broker feed…" : delayed ? "The broker’s quote timestamp is delayed." : "TradeLocker quotes refresh every 10 seconds.")}{pending && ` · Checked ${new Date(pending.checked_at).toLocaleTimeString()}`}</p><Button variant="ghost" size="sm" className="h-7 gap-1.5 rounded-full text-[11px]" onClick={() => setRetry(value => value + 1)}><RotateCw className="h-3 w-3" />Reconnect feed</Button></div>
-    {pending?.candles.at(-1) && <p className="mt-1 text-[10px] text-muted-foreground">Last broker candle: {new Date(pending.candles.at(-1)!.timestamp).toLocaleString()}. Candles refresh each minute; the dashed line tracks the latest quote.</p>}
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground"><p>{error || (missed ? "Waiting for the broker feed…" : delayed ? "The broker’s quote timestamp is delayed." : "Broker candles and quotes refresh every 5 seconds.")}{pending && ` · Checked ${new Date(pending.checked_at).toLocaleTimeString()}`}</p><Button variant="ghost" size="sm" className="h-7 gap-1.5 rounded-full text-[11px]" onClick={() => setRetry(value => value + 1)}><RotateCw className="h-3 w-3" />Reconnect feed</Button></div>
+    {pending?.candles.at(-1) && <p className="mt-1 text-[10px] text-muted-foreground">Last broker candle: {new Date(pending.candles.at(-1)!.timestamp).toLocaleString()}. The forming candle refreshes automatically; the dashed line tracks the latest quote.</p>}
     {pending?.warnings.length ? <p className="mt-2 text-xs text-amber-600">{pending.warnings.join(" ")}</p> : null}
   </div>
 }
