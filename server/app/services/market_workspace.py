@@ -55,6 +55,12 @@ class MarketWorkspaceService:
         results, warning = await self._partial("Finnhub", self.finnhub.symbol_search(query, limit), [])
         canonical = [instrument for row in results if (instrument := instrument_mapper.from_finnhub(row))]
         if not canonical and query:
+            compact = "".join(character for character in query.casefold() if character.isalpha())
+            for symbol in DEFAULT_FOREX_MAJORS:
+                candidate = instrument_mapper.resolve(f"forex:{symbol}")
+                if (compact and compact in symbol.replace("/", "").casefold()) or query.casefold() in candidate.description.casefold():
+                    canonical.append(candidate)
+        if not canonical and query:
             try:
                 canonical = [instrument_mapper.resolve(instrument_mapper.canonical_id("forex", query))]
             except InstrumentMappingError:

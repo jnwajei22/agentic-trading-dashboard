@@ -4,8 +4,17 @@ import { useEffect, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import { RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { BrokerMarketChart } from "./broker-market-chart"
 
-export function MarketChart({ symbol, label }: { symbol: string; label: string }) {
+export function MarketChart({ symbol, label, instrument, accountAlias }: { symbol: string; label: string; instrument: string; accountAlias?: string }) {
+  const [view, setView] = useState("broker")
+  return <div>
+    {accountAlias && <div className="mb-5 flex w-fit gap-1 rounded-full bg-muted/50 p-1" role="group" aria-label="Chart source">{[["broker", "Your broker"], ["tradingview", "TradingView"]].map(([value, title]) => <Button key={value} variant={view === value ? "secondary" : "ghost"} size="sm" className="h-8 rounded-full px-4 text-xs" aria-pressed={view === value} onClick={() => setView(value)}>{title}</Button>)}</div>}
+    {accountAlias && view === "broker" ? <BrokerMarketChart key={`${accountAlias}:${instrument}`} instrument={instrument} accountAlias={accountAlias} label={label} /> : <TradingViewChart symbol={symbol} label={label} />}
+  </div>
+}
+
+function TradingViewChart({ symbol, label }: { symbol: string; label: string }) {
   const container = useRef<HTMLDivElement>(null)
   const { resolvedTheme } = useTheme()
   const [reload, setReload] = useState(0)
@@ -21,7 +30,7 @@ export function MarketChart({ symbol, label }: { symbol: string; label: string }
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
     script.async = true
     script.onerror = () => setFailed(true)
-    script.textContent = JSON.stringify({ autosize: true, symbol, interval: "60", timezone: "Etc/UTC", theme: resolvedTheme === "light" ? "light" : "dark", style: "1", locale: "en", allow_symbol_change: false, calendar: false, details: false, hide_side_toolbar: true, hide_volume: true, backgroundColor: resolvedTheme === "light" ? "#ffffff" : "#171b1e", gridColor: "rgba(120,130,140,0.06)", support_host: "https://www.tradingview.com" })
+    script.textContent = JSON.stringify({ autosize: true, symbol, interval: "5", timezone: "Etc/UTC", theme: resolvedTheme === "light" ? "light" : "dark", style: "1", locale: "en", allow_symbol_change: false, calendar: false, details: false, hide_side_toolbar: true, hide_volume: true, backgroundColor: resolvedTheme === "light" ? "#ffffff" : "#171b1e", gridColor: "rgba(120,130,140,0.06)", support_host: "https://www.tradingview.com" })
     target.replaceChildren(widget, script)
     return () => { script.onerror = null; target.replaceChildren() }
   }, [symbol, resolvedTheme, reload])
