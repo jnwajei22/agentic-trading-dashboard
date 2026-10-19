@@ -1,11 +1,14 @@
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 import logging
+import asyncio
+import json
+import time
 import math
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from app.brokers.tradelocker.client import TradeLockerClient, TradeLockerError
@@ -526,36 +529,85 @@ async def broker_market_chart(instrument:str,account_alias:str,
     try:canonical=instrument_mapper.resolve(instrument)
     except InstrumentMappingError as exc:raise HTTPException(status_code=422,detail=str(exc)) from None
     symbol=canonical.symbol.replace("/","")
+    async with _chart_client(context, claims["sub"]) as client:
+        return await _broker_chart_snapshot(client, symbol, canonical.canonical_id, timeframe, history)
+
+
+def _chart_client(context:dict, owner:str)->TradeLockerClient:
+    return TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
+        server=context["server"],account_id=context["account_id"],account_number=context["account_number"],
+        cache_user_id=owner,cache_account_record_id=context.get("account_ref"))
+
+
+async def _broker_chart_snapshot(client:TradeLockerClient,symbol:str,canonical_id:str,timeframe:str,history:bool)->dict:
     checked_at=datetime.now(timezone.utc)
     candles=[];quote=None;warnings=[]
-    async with TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
-        server=context["server"],account_id=context["account_id"],account_number=context["account_number"],
-        cache_user_id=claims["sub"],cache_account_record_id=context.get("account_ref")) as client:
-        try:
-            raw=await client.get_quote(symbol)
-            bid=_quote_number(raw,{"bid","bidprice","bp"});ask=_quote_number(raw,{"ask","askprice","ap"})
-            price=_quote_number(raw,{"price","last","lastprice","mid","close"})
-            if price is None and bid is not None and ask is not None:price=(bid+ask)/2
-            stamp=_quote_number(raw,{"timestamp","time","updatedat","lastupdatetime"})
-            if stamp and stamp>10_000_000_000:stamp/=1000
-            quote_time=datetime.fromtimestamp(stamp,timezone.utc).isoformat() if stamp and 0<stamp<=checked_at.timestamp()+60 else None
-            if price is not None and math.isfinite(price) and price>0:
-                quote={"price":price,"bid":bid if bid is not None and math.isfinite(bid) else None,
-                       "ask":ask if ask is not None and math.isfinite(ask) else None,"timestamp":quote_time}
-        except (TradeLockerError,ValueError,OverflowError,OSError):
-            warnings.append("The broker quote could not be refreshed.")
-        try:
-            # The short live tail includes the forming bar. A quote-only refresh
-            # would move the price marker while leaving the plotted OHLC frozen.
-            result=await client.get_candles(symbol,timeframe,120 if history else 3,minimum_usable=1)
-            candles=[row.model_dump(mode="json") for row in result.candles[-120:]
-                     if all(math.isfinite(value) for value in (row.open,row.high,row.low,row.close))]
-            if result.cache_hit and not result.cache_fresh:warnings.append("Showing cached broker candles.")
-        except TradeLockerError:
-            warnings.append("Broker candle history is temporarily unavailable.")
+    try:
+        raw=await client.get_quote(symbol)
+        bid=_quote_number(raw,{"bid","bidprice","bp"});ask=_quote_number(raw,{"ask","askprice","ap"})
+        price=_quote_number(raw,{"price","last","lastprice","mid","close"})
+        if price is None and bid is not None and ask is not None:price=(bid+ask)/2
+        stamp=_quote_number(raw,{"timestamp","time","updatedat","lastupdatetime"})
+        if stamp and stamp>10_000_000_000:stamp/=1000
+        quote_time=datetime.fromtimestamp(stamp,timezone.utc).isoformat() if stamp and 0<stamp<=checked_at.timestamp()+60 else None
+        if price is not None and math.isfinite(price) and price>0:
+            quote={"price":price,"bid":bid if bid is not None and math.isfinite(bid) else None,
+                   "ask":ask if ask is not None and math.isfinite(ask) else None,"timestamp":quote_time}
+    except (TradeLockerError,ValueError,OverflowError,OSError):
+        warnings.append("The broker quote could not be refreshed.")
+    try:
+        # The short live tail includes the forming bar. A quote-only refresh
+        # would move the price marker while leaving the plotted OHLC frozen.
+        result=await client.get_candles(symbol,timeframe,120 if history else 3,minimum_usable=1)
+        candles=[row.model_dump(mode="json") for row in result.candles[-120:]
+                 if all(math.isfinite(value) for value in (row.open,row.high,row.low,row.close))]
+        if result.cache_hit and not result.cache_fresh:warnings.append("Showing cached broker candles.")
+    except TradeLockerError:
+        warnings.append("Broker candle history is temporarily unavailable.")
     if not quote and not candles:raise HTTPException(status_code=502,detail="The broker chart feed is unavailable. Try reconnecting shortly.")
-    return {"instrument":canonical.canonical_id,"timeframe":timeframe,"source":"TradeLocker",
+    return {"instrument":canonical_id,"timeframe":timeframe,"source":"TradeLocker",
             "checked_at":datetime.now(timezone.utc).isoformat(),"quote":quote,"candles":candles,"warnings":warnings}
+
+
+@router.get("/markets/chart/stream")
+async def broker_market_chart_stream(request:Request,instrument:str,account_alias:str,
+                                     timeframe:Literal["1m","5m","15m","1H"]="5m",
+                                     claims:dict=Depends(current_claims)):
+    # Check ownership before sending headers; credentials never leave the engine.
+    context=repository().account_connection_context(claims["sub"],account_alias)
+    if context is None:raise HTTPException(status_code=404,detail="Account not found.")
+    try:canonical=instrument_mapper.resolve(instrument)
+    except InstrumentMappingError as exc:raise HTTPException(status_code=422,detail=str(exc)) from None
+    return StreamingResponse(_broker_chart_events(request,context,claims["sub"],canonical.canonical_id,
+        canonical.symbol.replace("/",""),timeframe),media_type="text/event-stream",
+        headers={"Cache-Control":"no-store","X-Accel-Buffering":"no"})
+
+
+async def _broker_chart_events(request,context,owner,canonical_id,symbol,timeframe,*,lifetime=90,interval=5):
+    """Request-scoped market-data sampling, not a trading worker or a tick subscription.
+
+    Keep auth, instrument resolution and HTTP connections alive across samples.
+    Rotate before function deadlines; EventSource reconnects and reloads history.
+    """
+    deadline=time.monotonic()+lifetime
+    count=0
+    yield "retry: 3000\n: connected\n\n"
+    async with _chart_client(context,owner) as client:
+        while time.monotonic()<deadline and not await request.is_disconnected():
+            started=time.monotonic()
+            try:
+                async with asyncio.timeout(min(20,deadline-started)):
+                    snapshot=await _broker_chart_snapshot(client,symbol,canonical_id,timeframe,count%12==0)
+                snapshot["transport"]="sampled_sse"
+                snapshot["sample_ms"]=round((time.monotonic()-started)*1000)
+                yield "event: snapshot\ndata: "+json.dumps(snapshot,allow_nan=False)+"\n\n"
+                count+=1
+            except (HTTPException,TimeoutError):
+                yield 'event: feed_error\ndata: {"message":"Broker data is delayed. Retrying automatically."}\n\n'
+            # A five-second target cadence includes upstream time, not an extra wait.
+            remaining=deadline-time.monotonic()
+            if remaining>0:await asyncio.sleep(min(remaining,max(1,interval-(time.monotonic()-started))))
+    yield "event: rotate\ndata: {}\n\n"
 
 
 @router.get("/markets/{canonical_id:path}/summary")

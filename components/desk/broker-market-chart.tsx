@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { RotateCw } from "lucide-react"
-import { browserAfdFetch } from "@/lib/afd/browser-client"
 import { mergeChartCandles } from "@/lib/afd/chart-candles"
 import { Button } from "@/components/ui/button"
 
@@ -17,29 +16,44 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
   const [loading, setLoading] = useState(true)
   const [clock, setClock] = useState(Date.now())
   useEffect(() => {
-    const controller = new AbortController()
-    let stopped = false, running = false, count = 0
-    let timer: ReturnType<typeof setTimeout>
+    let stream: EventSource | null = null
+    let stopped = false
+    let reconnect: ReturnType<typeof setTimeout> | undefined
+    let lastMessage = Date.now()
     setData(null); setLoading(true); setError("")
-    async function refresh() {
-      clearTimeout(timer)
-      if (running || stopped) return
-      if (document.hidden) { timer = setTimeout(refresh, 5000); return }
-      running = true
-      try {
-        const params = new URLSearchParams({ instrument, account_alias: accountAlias, timeframe, history: String(count % 12 === 0) })
-        const next = await browserAfdFetch<ChartData>(`markets/chart?${params}`, { signal: controller.signal })
+    function connect() {
+      clearTimeout(reconnect)
+      stream?.close()
+      if (stopped || document.hidden) return
+      const params = new URLSearchParams({ instrument, account_alias: accountAlias, timeframe })
+      lastMessage = Date.now()
+      stream = new EventSource(`/api/markets/stream?${params}`)
+      stream.addEventListener("snapshot", event => {
         if (stopped) return
-        setData(previous => ({ ...next, candles: mergeChartCandles(previous?.candles ?? [], next.candles) }))
-        setError(""); count++
-      } catch { if (!stopped) setError("The broker feed paused. Retrying automatically.") }
-      finally { running = false; if (!stopped) { setLoading(false); timer = setTimeout(refresh, 5000) } }
+        try {
+          const next = JSON.parse((event as MessageEvent).data) as ChartData
+          if (next.instrument !== instrument || next.timeframe !== timeframe) return
+          lastMessage = Date.now()
+          setData(previous => ({ ...next, candles: mergeChartCandles(previous?.candles ?? [], next.candles) }))
+          setError(""); setLoading(false)
+        } catch { setError("The chart received an invalid update. Reconnecting…"); connect() }
+      })
+      stream.addEventListener("feed_error", () => { setLoading(false); setError("Broker data is delayed. Retrying automatically.") })
+      stream.addEventListener("rotate", () => { stream?.close(); reconnect = setTimeout(connect, 250) })
+      stream.onerror = () => { setLoading(false); setError("The broker feed paused. Reconnecting automatically.") }
     }
-    const resume = () => { if (!document.hidden) void refresh() }
-    void refresh()
+    const resume = () => {
+      if (document.hidden) { stream?.close(); clearTimeout(reconnect) }
+      else connect()
+    }
+    // Recover stalled connections even when the browser never emits an error.
+    const watchdog = setInterval(() => {
+      if (!document.hidden && Date.now() - lastMessage > 35000) connect()
+    }, 5000)
+    connect()
     document.addEventListener("visibilitychange", resume)
     window.addEventListener("online", resume)
-    return () => { stopped = true; clearTimeout(timer); controller.abort(); document.removeEventListener("visibilitychange", resume); window.removeEventListener("online", resume) }
+    return () => { stopped = true; stream?.close(); clearTimeout(reconnect); clearInterval(watchdog); document.removeEventListener("visibilitychange", resume); window.removeEventListener("online", resume) }
   }, [instrument, accountAlias, timeframe, retry])
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer) }, [])
   const pending = data?.instrument === instrument && data.timeframe === timeframe ? data : null
@@ -56,8 +70,8 @@ export function BrokerMarketChart({ instrument, accountAlias, label }: { instrum
     <div className="h-[340px] sm:h-[420px]" aria-busy={loading}>
       {pending?.candles.length ? <CandlePlot candles={pending.candles} price={quote?.price} label={label} precision={precision} /> : <div className="flex h-full items-center justify-center rounded-2xl bg-muted/30 p-6 text-center text-sm text-muted-foreground">{loading ? "Loading broker candles…" : error || "The broker returned no candle history. Its latest quote is shown above."}</div>}
     </div>
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground"><p>{error || (missed ? "Waiting for the broker feed…" : delayed ? "The broker’s quote timestamp is delayed." : "Broker candles and quotes refresh every 5 seconds.")}{pending && ` · Checked ${new Date(pending.checked_at).toLocaleTimeString()}`}</p><Button variant="ghost" size="sm" className="h-7 gap-1.5 rounded-full text-[11px]" onClick={() => setRetry(value => value + 1)}><RotateCw className="h-3 w-3" />Reconnect feed</Button></div>
-    {pending?.candles.at(-1) && <p className="mt-1 text-[10px] text-muted-foreground">Last broker candle: {new Date(pending.candles.at(-1)!.timestamp).toLocaleString()}. The forming candle refreshes automatically; the dashed line tracks the latest quote.</p>}
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground"><p>{error || (missed ? "Waiting for the broker feed…" : delayed ? "The broker’s quote timestamp is delayed." : (loading ? "Connecting to broker feed…" : "Broker feed connected · sampled updates"))}{pending && ` · Checked ${new Date(pending.checked_at).toLocaleTimeString()}`}</p><Button variant="ghost" size="sm" className="h-7 gap-1.5 rounded-full text-[11px]" onClick={() => setRetry(value => value + 1)}><RotateCw className="h-3 w-3" />Reconnect feed</Button></div>
+    {pending?.candles.at(-1) && <p className="mt-1 text-[10px] text-muted-foreground">Last broker candle: {new Date(pending.candles.at(-1)!.timestamp).toLocaleString()}. Broker OHLC updates automatically; the dashed line shows the latest sampled quote. This is not a tick-by-tick feed.</p>}
     {pending?.warnings.length ? <p className="mt-2 text-xs text-amber-600">{pending.warnings.join(" ")}</p> : null}
   </div>
 }
