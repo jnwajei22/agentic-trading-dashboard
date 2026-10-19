@@ -222,3 +222,20 @@ async def test_kill_switch_is_rechecked_immediately_before_dispatch(tmp_path,mon
     with pytest.raises(tools.AuthorizationError):
         await tools.invoke('u','submit_demo_order',{'preview_id':'p','idempotency_key':'k'},guard=lambda:tools.enforce_execution_policy('u',Context(profile_ref='p'),Mode.COOP,'execute'))
     assert not dispatched
+
+
+def test_chat_history_titles_use_first_user_message_and_preserve_ownership(tmp_path):
+    repo=AgentRepository(tmp_path/'history.db')
+    first=repo.create('owner','research',None)
+    repo.add(first,'user',{'text':'  Review\n my   EUR/USD strategy  '})
+    repo.add(first,'user',{'text':'Follow-up should not replace the title'})
+    long=repo.create('owner','research',None)
+    repo.add(long,'user',{'text':'a'*120})
+    empty=repo.create('owner','research',None)
+    other=repo.create('other','research',None)
+    repo.add(other,'user',{'text':'Private to another owner'})
+    history={item['id']:item for item in repo.list('owner')}
+    assert history[first]['title']=='Review my EUR/USD strategy'
+    assert len(history[long]['title'])<=80 and history[long]['title'].endswith('…')
+    assert history[empty]['title']=='New chat'
+    assert other not in history and all('first_message' not in item for item in history.values())

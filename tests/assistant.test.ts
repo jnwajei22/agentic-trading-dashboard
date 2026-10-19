@@ -27,3 +27,11 @@ test("client assistant has no provider secret or direct model calls", () => {
   assert.match(proxy, /new Response\(upstream.body/)
   assert.match(proxy, /isSameOriginRequest\(request\)/)
 })
+
+test("assistant labels use readable page names without internal identifiers", async () => {
+  const { assistantPageLabel, assistantToolLabel } = await import("../lib/afd/assistant-display")
+  assert.equal(assistantPageLabel("/dashboard"), "Overview")
+  assert.equal(assistantPageLabel("/autonomous/profile_private_id"), "Strategy details")
+  assert.equal(assistantPageLabel("/unknown/internal_id"), "Workspace")
+  assert.equal(assistantToolLabel("list_execution_profiles"), "Execution Profiles")
+})

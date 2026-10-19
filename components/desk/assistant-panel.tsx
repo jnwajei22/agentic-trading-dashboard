@@ -9,6 +9,7 @@ import {
   Square,
   Send,
   SlidersHorizontal,
+  History as HistoryIcon,
   Plus,
   Sparkles,
   ArrowUpRight,
@@ -32,12 +33,21 @@ type Message = {
   tool?: string;
   result?: Record<string, unknown>;
 };
-type History = { id: string; mode: string; profile_ref: string | null };
+import { AssistantOptions, AssistantHistoryList } from "./assistant-controls";
+import {
+  assistantModes,
+  assistantPageLabel,
+  assistantToolLabel,
+  type AssistantHistory as History,
+} from "@/lib/afd/assistant-display";
 
 export function AssistantPanel() {
   const [pageContext, setPageContext] = useState<PageContext>({});
   const [open, setOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [mode, setMode] = useState("research");
   const [profile, setProfile] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -80,6 +90,8 @@ export function AssistantPanel() {
   useEffect(() => {
     if (!open) return;
     let active = true;
+    setHistoryLoading(true);
+    setHistoryError("");
     void Promise.all([
       browserAfdFetch<{ profiles: Profile[] }>("execution-profiles"),
       browserAfdFetch<{ conversations: History[] }>("assistant/conversations"),
@@ -91,24 +103,34 @@ export function AssistantPanel() {
         }
       })
       .catch(() => {
-        if (active) setError("Unable to load assistant history or profiles.");
+        if (active)
+          setHistoryError(
+            "Unable to load chats. Close and reopen the assistant to retry.",
+          );
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [open]);
+  }, [open, showHistory]);
   useEffect(() => {
     scroll.current?.scrollIntoView({ block: "end" });
   }, [messages]);
   useEffect(() => () => abort.current?.abort(), []);
 
   function reset() {
+    setShowHistory(false);
+    setInput("");
     setThread("");
     setMessages([]);
     setUsed([]);
     setError("");
   }
   async function restore(id: string) {
+    if (busy) return;
+    setBusy(true);
     setError("");
     try {
       const data = await browserAfdFetch<{
@@ -116,6 +138,9 @@ export function AssistantPanel() {
         messages: { kind: string; payload: Record<string, unknown> }[];
       }>(`assistant/conversations/${id}`);
       setThread(id);
+      setShowHistory(false);
+      setInput("");
+      setUsed([]);
       setMode(data.conversation.mode);
       setProfile(data.conversation.profile_ref ?? "");
       setMessages(
@@ -137,6 +162,8 @@ export function AssistantPanel() {
       );
     } catch {
       setError("Conversation could not be loaded.");
+    } finally {
+      setBusy(false);
     }
   }
   function receive(event: AssistantEvent) {
@@ -157,7 +184,7 @@ export function AssistantPanel() {
         ...old,
         {
           kind: "progress",
-          text: `Using ${event.tool?.replaceAll("_", " ")}…`,
+          text: `${assistantToolLabel(event.tool)}…`,
         },
       ]);
     if (event.type === "tool_result")
@@ -249,15 +276,15 @@ export function AssistantPanel() {
           className="fixed bottom-6 right-6 z-40 h-12 w-12 gap-2.5 rounded-full p-0 sm:w-auto sm:px-5 shadow-lg shadow-emerald-950/15"
           onClick={() => setOpen(true)}
           aria-expanded={open}
-          aria-label="Ask your desk"
+          aria-label="Open assistant"
         >
           <Sparkles className="h-4 w-4" />
-          <span className="hidden sm:inline">Ask your desk</span>
+          <span className="hidden sm:inline">Assistant</span>
         </Button>
       )}
       {open && (
         <aside
-          aria-label="Desk Assistant"
+          aria-label="Assistant"
           className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[460px] flex-col bg-card shadow-2xl ring-1 ring-border/60 sm:inset-y-4 sm:right-4 sm:w-[calc(100%_-_2rem)] sm:rounded-3xl"
         >
           <header className="flex items-center gap-3 px-6 pb-5 pt-6">
@@ -265,10 +292,10 @@ export function AssistantPanel() {
               <Sparkles className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-semibold">Desk assistant</h2>
+              <h2 className="text-sm font-semibold">Assistant</h2>
               <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
                 {selected?.nickname || selected?.broker || "Your workspace"} ·{" "}
-                {context.market ?? pathname.split("/").filter(Boolean)[0]}
+                {context.market ?? assistantPageLabel(pathname)}
               </p>
             </div>
             <Button
@@ -277,7 +304,7 @@ export function AssistantPanel() {
               className="h-8 w-8 rounded-full"
               disabled={busy}
               onClick={reset}
-              aria-label="New conversation"
+              aria-label="New chat"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -291,177 +318,152 @@ export function AssistantPanel() {
               <X className="h-4 w-4" />
             </Button>
           </header>
-          <div className="mx-6 flex items-center justify-between border-y border-border/50 py-3">
-            <span className="flex items-center gap-2 text-xs">
-              {modeLabel}
-              <span className="text-muted-foreground">
-                {mode === "research"
-                  ? "· read only"
-                  : mode === "co_op"
-                    ? "· approval required"
-                    : "· profile permissions"}
-              </span>
-            </span>
+          <div className="mx-6 flex items-center justify-between border-y border-border/50 py-2">
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-full text-muted-foreground"
-              aria-label="Assistant settings and history"
+              className="h-9 gap-2 rounded-full px-2 text-xs"
+              aria-label="Change assistant mode"
               aria-expanded={showSettings}
-              onClick={() => setShowSettings(!showSettings)}
+              disabled={busy}
+              onClick={() => {
+                setShowSettings(!showSettings);
+                setShowHistory(false);
+              }}
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+              {modeLabel}
+              <span className="text-muted-foreground">
+                · {assistantModes.find((item) => item.value === mode)?.detail}
+              </span>
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-9 gap-1.5 rounded-full px-2 text-xs text-muted-foreground"
+              aria-label="Chat history"
+              aria-expanded={showHistory}
+              disabled={busy}
+              onClick={() => {
+                setShowHistory(!showHistory);
+                setShowSettings(false);
+              }}
+            >
+              <HistoryIcon className="h-3.5 w-3.5" />
+              History
             </Button>
           </div>
-          {showSettings && (
-            <div className="mx-6 space-y-3 border-b border-border/50 py-4">
-              <label className="block text-xs text-muted-foreground">
-                Mode
-                <select
-                  aria-label="Assistant mode"
-                  className="mt-1.5 w-full rounded-xl border border-border/70 bg-background p-2.5 text-sm text-foreground"
-                  value={mode}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setMode(e.target.value);
-                    reset();
-                  }}
-                >
-                  <option value="research">Research</option>
-                  <option value="co_op">Co-op · approval required</option>
-                  <option value="autonomous">
-                    Autonomous · profile permissions
-                  </option>
-                </select>
-              </label>
-              <label className="block text-xs text-muted-foreground">
-                Execution profile
-                <select
-                  aria-label="Assistant execution profile"
-                  className="mt-1.5 w-full rounded-xl border border-border/70 bg-background p-2.5 text-sm text-foreground"
-                  value={profile}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setProfile(e.target.value);
-                    reset();
-                  }}
-                >
-                  <option value="">
-                    {pageProfile ? "Current profile" : "Select a profile"}
-                  </option>
-                  {profiles
-                    .filter(
-                      (p) => !selected || p.account_id === selected.publicRef,
-                    )
-                    .map((p) => (
-                      <option key={p.public_id} value={p.public_id}>
-                        {p.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                {mode === "research"
-                  ? "Read-only research. No trading actions."
-                  : mode === "co_op"
-                    ? "Review the exact preview below before approving. Approvals expire after 60 seconds."
-                    : "Execution uses existing demo permissions and safety controls. Selecting this mode does not enable autonomy."}
-              </p>
-              <select
-                aria-label="Previous conversations"
-                className="w-full rounded-xl border border-border/70 bg-background p-2.5 text-xs"
-                value={threads.some((t) => t.id === thread) ? thread : ""}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {showSettings && (
+              <AssistantOptions
+                mode={mode}
+                profile={profile}
+                profiles={profiles.filter(
+                  (item) => !selected || item.account_id === selected.publicRef,
+                )}
+                hasCurrentProfile={Boolean(
+                  pageContext.profile_ref || pageProfile,
+                )}
                 disabled={busy}
-                onChange={(e) => {
-                  if (e.target.value) void restore(e.target.value);
+                onMode={(value) => {
+                  setMode(value);
+                  reset();
                 }}
-              >
-                <option value="">Conversation history</option>
-                {threads.map((t, i) => (
-                  <option key={t.id} value={t.id}>
-                    {t.mode === "co_op"
-                      ? "Co-op"
-                      : t.mode === "autonomous"
-                        ? "Autonomous"
-                        : "Research"}{" "}
-                    conversation {threads.length - i}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div
-            className="flex-1 space-y-5 overflow-y-auto px-6 py-6"
-            role="log"
-            aria-live="polite"
-          >
-            {!messages.length && (
-              <div className="flex min-h-72 flex-col justify-center py-8">
-                <span className="mb-5 grid h-12 w-12 place-items-center rounded-full bg-emerald-500/10 text-emerald-600">
-                  <Bot className="h-6 w-6" />
-                </span>
-                <h3 className="text-2xl font-medium tracking-tight">
-                  A second pair of eyes.
-                </h3>
-                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                  Explore a market, review your account, or think through a
-                  strategy.
-                </p>
-                <div className="mt-6 space-y-2">
-                  {[
-                    "What can I do with this desk?",
-                    "Summarize my account setup",
-                    "Help me review my strategy",
-                  ].map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      className="flex w-full items-center justify-between gap-3 rounded-2xl bg-muted/50 px-4 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      onClick={() => setInput(prompt)}
-                    >
-                      {prompt}
-                      <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
-                    </button>
-                  ))}
-                </div>
-              </div>
+                onProfile={(value) => {
+                  setProfile(value);
+                  reset();
+                }}
+              />
             )}
-            {messages.map((m, index) => (
-              <article
-                key={index}
-                className={`text-sm leading-relaxed ${m.kind === "user" ? "ml-8 rounded-2xl rounded-br-md bg-emerald-500/10 px-4 py-3" : m.kind === "tool" || m.kind === "execution" ? "rounded-2xl bg-muted/50 p-4" : m.kind === "progress" ? "text-xs text-muted-foreground" : "px-1 py-1"}`}
-              >
-                {m.text && (
-                  <p className="whitespace-pre-wrap break-words">{m.text}</p>
-                )}
-                {m.result && (
-                  <>
-                    <AssistantResult
-                      result={m.result}
-                      title={
-                        m.kind === "execution"
-                          ? "Execution result"
-                          : (m.tool?.replaceAll("_", " ") ?? "Action")
-                      }
-                    />
-                    {m.result.status === "approval_required" && (
-                      <Button
-                        className="mt-3 w-full"
-                        disabled={
-                          busy ||
-                          used.includes(String(m.result.approval_id)) ||
-                          mode !== "co_op"
-                        }
-                        onClick={() => void approve(m.result!)}
-                      >
-                        Approve {String(m.result.action).replaceAll("_", " ")}
-                      </Button>
-                    )}
-                  </>
-                )}
-              </article>
-            ))}
-            <div ref={scroll} />
+            {showHistory ? (
+              <div className="px-6 py-6">
+                <AssistantHistoryList
+                  threads={threads}
+                  current={thread}
+                  loading={historyLoading}
+                  error={historyError}
+                  disabled={busy}
+                  onSelect={(id) => void restore(id)}
+                />
+              </div>
+            ) : (
+              <>
+                <div
+                  className="flex-1 space-y-5 overflow-y-auto px-6 py-6"
+                  role="log"
+                  aria-live="polite"
+                >
+                  {!messages.length && (
+                    <div className="flex min-h-72 flex-col justify-center py-8">
+                      <span className="mb-5 grid h-12 w-12 place-items-center rounded-full bg-emerald-500/10 text-emerald-600">
+                        <Bot className="h-6 w-6" />
+                      </span>
+                      <h3 className="text-2xl font-medium tracking-tight">
+                        A second pair of eyes.
+                      </h3>
+                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                        Explore a market, review your account, or think through
+                        a strategy.
+                      </p>
+                      <div className="mt-6 space-y-2">
+                        {[
+                          "What can you help me with?",
+                          "Summarize my account setup",
+                          "Help me review my strategy",
+                        ].map((prompt) => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-muted/50 px-4 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            onClick={() => setInput(prompt)}
+                          >
+                            {prompt}
+                            <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {messages.map((m, index) => (
+                    <article
+                      key={index}
+                      className={`text-sm leading-relaxed ${m.kind === "user" ? "ml-8 rounded-2xl rounded-br-md bg-emerald-500/10 px-4 py-3" : m.kind === "tool" || m.kind === "execution" ? "rounded-2xl bg-muted/50 p-4" : m.kind === "progress" ? "text-xs text-muted-foreground" : "px-1 py-1"}`}
+                    >
+                      {m.text && (
+                        <p className="whitespace-pre-wrap break-words">
+                          {m.text}
+                        </p>
+                      )}
+                      {m.result && (
+                        <>
+                          <AssistantResult
+                            result={m.result}
+                            title={
+                              m.kind === "execution"
+                                ? "Execution result"
+                                : assistantToolLabel(m.tool)
+                            }
+                          />
+                          {m.result.status === "approval_required" && (
+                            <Button
+                              className="mt-3 w-full"
+                              disabled={
+                                busy ||
+                                used.includes(String(m.result.approval_id)) ||
+                                mode !== "co_op"
+                              }
+                              onClick={() => void approve(m.result!)}
+                            >
+                              Approve{" "}
+                              {String(m.result.action).replaceAll("_", " ")}
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </article>
+                  ))}
+                  <div ref={scroll} />
+                </div>
+              </>
+            )}
           </div>
           {error && (
             <p
@@ -471,53 +473,55 @@ export function AssistantPanel() {
               {error}
             </p>
           )}
-          <form
-            className="p-4 pt-0 sm:p-5 sm:pt-0"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void send();
-            }}
-          >
-            <div className="flex items-end gap-2 rounded-2xl bg-background p-3 ring-1 ring-border/70 focus-within:ring-emerald-500/50">
-              <textarea
-                aria-label="Message to assistant"
-                value={input}
-                maxLength={8000}
-                onChange={(e) => setInput(e.target.value)}
-                className="min-h-16 flex-1 resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground"
-                placeholder="What’s on your mind?"
-                disabled={busy}
-              />
-              {busy ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="h-9 w-9 rounded-full"
-                  aria-label="Stop response"
-                  onClick={() => abort.current?.abort()}
-                >
-                  <Square className="h-3.5 w-3.5" />
-                </Button>
-              ) : (
-                <Button
-                  aria-label="Send message"
-                  size="icon"
-                  className="h-9 w-9 rounded-full"
-                  disabled={
-                    !input.trim() || (mode !== "research" && !boundProfile)
-                  }
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-            <p className="mt-2.5 text-center text-[10px] text-muted-foreground">
-              {mode === "research"
-                ? "Research mode cannot place trades."
-                : "Your profile permissions and safety controls always apply."}
-            </p>
-          </form>
+          {!showHistory && (
+            <form
+              className="p-4 pt-0 sm:p-5 sm:pt-0"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void send();
+              }}
+            >
+              <div className="flex items-end gap-2 rounded-2xl bg-background p-3 ring-1 ring-border/70 focus-within:ring-emerald-500/50">
+                <textarea
+                  aria-label="Message to assistant"
+                  value={input}
+                  maxLength={8000}
+                  onChange={(e) => setInput(e.target.value)}
+                  className="min-h-16 flex-1 resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground"
+                  placeholder="What’s on your mind?"
+                  disabled={busy}
+                />
+                {busy ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="h-9 w-9 rounded-full"
+                    aria-label="Stop response"
+                    onClick={() => abort.current?.abort()}
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                  </Button>
+                ) : (
+                  <Button
+                    aria-label="Send message"
+                    size="icon"
+                    className="h-9 w-9 rounded-full"
+                    disabled={
+                      !input.trim() || (mode !== "research" && !boundProfile)
+                    }
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+              <p className="mt-2.5 text-center text-[10px] text-muted-foreground">
+                {mode === "research"
+                  ? "Research mode cannot place trades."
+                  : "Your profile permissions and safety controls always apply."}
+              </p>
+            </form>
+          )}
         </aside>
       )}
     </>

@@ -54,7 +54,20 @@ class AgentRepository:
 
     def list(self, user):
         with self.db() as db:
-            return [dict(r) for r in db.execute('SELECT id,mode,profile_ref,created_at FROM agent_conversations WHERE user_sub=? ORDER BY created_at DESC LIMIT 50',(user,))]
+            rows=db.execute('''SELECT c.id,c.mode,c.profile_ref,c.created_at,
+                (SELECT m.payload FROM agent_messages m WHERE m.conversation_id=c.id
+                 AND m.kind='user' ORDER BY m.seq LIMIT 1) AS first_message
+                FROM agent_conversations c WHERE c.user_sub=? ORDER BY c.created_at DESC LIMIT 50''',(user,)).fetchall()
+        conversations=[]
+        for row in rows:
+            item=dict(row)
+            try: payload=json.loads(item.pop('first_message') or '{}')
+            except (ValueError,TypeError): payload={}
+            text=payload.get('text') if isinstance(payload,dict) else None
+            title=' '.join(text.split()) if isinstance(text,str) else ''
+            item['title']=(title[:77].rstrip()+'…' if len(title)>80 else title) or 'New chat'
+            conversations.append(item)
+        return conversations
 
     def messages(self, user, key):
         self.owned(user,key)
