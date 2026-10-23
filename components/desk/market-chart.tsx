@@ -5,12 +5,16 @@ import { useTheme } from "next-themes"
 import { RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { BrokerMarketChart } from "./broker-market-chart"
+import { KrakenMarketChart } from "./kraken-market-chart"
+import { krakenSymbol } from "@/lib/afd/kraken-market-data"
 
 export function MarketChart({ symbol, label, instrument, accountAlias }: { symbol: string; label: string; instrument: string; accountAlias?: string }) {
-  const [view, setView] = useState("broker")
+  const streamingSymbol = krakenSymbol(instrument)
+  const [view, setView] = useState(streamingSymbol ? "kraken" : accountAlias ? "broker" : "tradingview")
+  const sources = [...(streamingSymbol ? [["kraken", "Kraken live"]] : []), ...(accountAlias ? [["broker", "Your broker"]] : []), ["tradingview", "TradingView"]]
   return <div>
-    {accountAlias && <div className="mb-5 flex w-fit gap-1 rounded-full bg-muted/50 p-1" role="group" aria-label="Chart source">{[["broker", "Your broker"], ["tradingview", "TradingView"]].map(([value, title]) => <Button key={value} variant={view === value ? "secondary" : "ghost"} size="sm" className="h-8 rounded-full px-4 text-xs" aria-pressed={view === value} onClick={() => setView(value)}>{title}</Button>)}</div>}
-    {accountAlias && view === "broker" ? <BrokerMarketChart key={`${accountAlias}:${instrument}`} instrument={instrument} accountAlias={accountAlias} label={label} /> : <TradingViewChart symbol={symbol} label={label} />}
+    <div className="mb-5 flex w-fit flex-wrap gap-1 rounded-full bg-muted/50 p-1" role="group" aria-label="Chart source">{sources.map(([value, title]) => <Button key={value} variant={view === value ? "secondary" : "ghost"} size="sm" className="h-8 rounded-full px-4 text-xs" aria-pressed={view === value} onClick={() => setView(value)}>{title}</Button>)}</div>
+    {view === "kraken" && streamingSymbol ? <KrakenMarketChart key={instrument} instrument={instrument} symbol={streamingSymbol} label={label} /> : accountAlias && view === "broker" ? <BrokerMarketChart key={`${accountAlias}:${instrument}`} instrument={instrument} accountAlias={accountAlias} label={label} /> : <TradingViewChart symbol={symbol} label={label} />}
   </div>
 }
 
