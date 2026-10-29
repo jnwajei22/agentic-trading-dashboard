@@ -617,8 +617,12 @@ class AutonomousDemoService:
                     bid, ask = self._quote(quote)
                     if ask < bid:
                         raise ValueError
-                except (TradeLockerError, AutonomousExecutionError, ValueError):
-                    raise self._snapshot_failure(f"{pair.lower()}_quote") from None
+                except (TradeLockerError, AutonomousExecutionError, ValueError) as exc:
+                    diagnostics={"broker_error_category":getattr(exc,"code","crossed_quote"),
+                        "broker_operation":getattr(exc,"operation","parse_quote"),"http_status":getattr(exc,"status_code",None)}
+                    logger.warning("execution_quote_unavailable profile_ref=%s symbol=%s category=%s operation=%s http_status=%s",
+                        profile_ref,pair,diagnostics["broker_error_category"],diagnostics["broker_operation"],diagnostics["http_status"])
+                    raise self._snapshot_failure(f"{pair.lower()}_quote",diagnostics) from None
                 try:
                     instrument_payload = await client.get_instrument_details(pair)
                     instrument = parse_instrument_metadata(instrument_payload, pair)

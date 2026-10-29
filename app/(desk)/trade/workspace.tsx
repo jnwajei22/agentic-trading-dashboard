@@ -68,7 +68,10 @@ export function TradeWorkspace(){
   const update=(change:Partial<Ticket>)=>{reviewSequence.current++;setReviewing(false);setReviewError("");setTicket(current=>({...current,...change,preview:null}))}
   async function review(){
     const current=++reviewSequence.current;setReviewing(true);setReviewError("")
-    try{const approved=await browserAfdFetch<ApprovedOrder>("trading/order-previews",{method:"POST",body:JSON.stringify({...payload,profile_ref:profileRef})});if(current===reviewSequence.current)setTicket(value=>({...value,preview:{...approved,calculation:value.calculation!}}))}
+    try{const approved=await browserAfdFetch<ApprovedOrder>("trading/order-previews",{method:"POST",body:JSON.stringify({...payload,profile_ref:profileRef})});if(current===reviewSequence.current)setTicket(value=>({...value,preview:{...approved,calculation:{...value.calculation!,
+      entry_price:approved.entry,quote:{...value.calculation!.quote,...approved.execution_quote,spread:approved.execution_quote.ask-approved.execution_quote.bid},
+      stop_loss:{price:approved.stop_loss,distance_pips:Math.abs(approved.entry-approved.stop_loss)/value.calculation!.pip_size,estimated_loss:approved.estimated_risk,risk_percent:approved.risk_percent},
+      take_profit:{price:approved.take_profit,distance_pips:Math.abs(approved.entry-approved.take_profit)/value.calculation!.pip_size,estimated_profit:approved.estimated_reward,reward_to_risk:approved.reward_risk},margin_estimate:approved.estimated_margin}}}))}
     catch(cause){if(current===reviewSequence.current)setReviewError(cause instanceof Error?cause.message:"Order review failed.")}
     finally{if(current===reviewSequence.current)setReviewing(false)}
   }

@@ -9,6 +9,7 @@ export type ApprovedOrder = {
   preview_id: string; expires_at: string; profile_ref: string; account_id: string;
   pair: string; side: string; entry: number; stop_loss: number; take_profit: number;
   lot_size: number; estimated_risk: number; estimated_margin: number; reward_risk: number;
+  risk_percent: number; estimated_reward: number; execution_quote: {bid:number;ask:number;timestamp:string};
 }
 type Outcome = { status: string; execution_id?: string; broker_order_id?: string; broker_position_id?: string; manual_review_required?: boolean; message?: string }
 export type ManualProfile = { public_id: string; account_id: string; name: string; enabled: boolean; execution_mode: string; account_environment: string }

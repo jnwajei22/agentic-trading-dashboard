@@ -92,7 +92,8 @@ async def preview_ticket(payload: TicketPreview, claims=Depends(current_claims))
         approved = await service.review(user, payload.profile_ref, proposal, requested_lots=payload.quantity.value)
         # These frozen values are the actual immutable server preview, not the earlier estimate.
         return {**approved, "account_id": payload.account_id, "profile_ref": payload.profile_ref,
-                "environment": "demo", "submission_allowed": True}
+                "environment": "demo", "submission_allowed": True,
+                "execution_quote": {"bid":bid,"ask":ask,"timestamp":snapshot.get("retrieved_at")}}
     except AutonomousExecutionError as exc:
         execution_error(exc)
     except InstrumentMappingError:
