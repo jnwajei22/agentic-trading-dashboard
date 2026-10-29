@@ -2,6 +2,7 @@ const PROVIDERS:Record<string,string>={
   finnhub:"Finnhub",
   kraken:"Kraken",
   bls:"BLS",
+  bea:"BEA",
   ecb:"ECB",
   fred:"FRED",
   tradingview:"TradingView",

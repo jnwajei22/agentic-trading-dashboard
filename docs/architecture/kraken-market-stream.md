@@ -22,7 +22,7 @@ Public API access requires no paid subscription. No claim of unrestricted data r
 
 ## Research feeds
 
-The existing Finnhub news/calendar integration remains available when configured. On provider failure, News falls back to official BLS and ECB RSS announcements. Calendar falls back to the official BLS iCalendar release schedule. These keyless sources are cached for five minutes with bounded response sizes and request timeouts, and carry visible coverage labels. BLS calendar coverage is U.S. releases only; it supplies no consensus forecasts, actual results, or impact ratings. Time conversion respects Eastern daylight saving transitions. FRED context remains optional and separately attributed. HTML is rendered as plain text, DTD/entity declarations are rejected, and news links require HTTPS.
+The existing Finnhub news/calendar integration remains available when configured. On provider failure, News falls back to official BLS and ECB RSS announcements. Calendar falls back to the official BLS and BEA iCalendar release schedules, preserving available sources when one feed cannot be reached. These keyless sources are cached for five minutes with bounded response sizes and request timeouts, and carry visible coverage labels. Official calendar coverage is U.S. releases only; it supplies no consensus forecasts, actual results, or impact ratings. Time conversion respects Eastern daylight saving transitions. FRED context remains optional and separately attributed. HTML is rendered as plain text, DTD/entity declarations are rejected, and news links require HTTPS.
 
 These fallbacks serve dashboard research only. They do not replace the autonomous engine's required-provider checks or clear execution news blackouts.
 

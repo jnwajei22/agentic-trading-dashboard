@@ -94,7 +94,7 @@ class MarketWorkspaceService:
             official, warnings = await self.public.news(limit)
             return self._stamp({"items": [item.model_dump(mode="json") for item in official],
                 "sources": sorted({item.source_name for item in official}), "warnings": warnings,
-                "coverage": "Official U.S. economic releases and ECB announcements. Broader market headlines require a configured news provider."})
+                "coverage": f"Official announcements from {', '.join(sorted({item.source_name for item in official})) or 'public sources'}. Broader market headlines require a configured news provider."})
         return self._stamp({"items": [item.model_dump(mode="json") for item in items], "sources": ["Finnhub"],
                 "warnings": [], "coverage": "Market headlines supplied by Finnhub."})
 
@@ -157,10 +157,11 @@ class MarketWorkspaceService:
                 "associated_fred_series": context, "relevant": related,
                 "relevance_label": f"Relevant to {currency} side of {instrument.symbol}" if related else None})
         normalized.sort(key=lambda row: (not row["relevant"], str(row.get("scheduled_time") or "")))
-        sources = (["BLS"] if official_fallback else ["Finnhub"]) + (["FRED"] if drivers else [])
+        official_sources = getattr(self.public, "calendar_sources", None) or sorted({item.source for item in items})
+        sources = (official_sources if official_fallback else ["Finnhub"]) + (["FRED"] if drivers else [])
         return self._stamp({"items": normalized, "sources": sources,
-                "coverage": "U.S. economic releases from BLS · Next two weeks · Local times · No consensus forecasts or provider impact ratings." if official_fallback else "Economic calendar from Finnhub · Times shown in your local timezone.",
-                "warnings": ([warning] if warning else []) + driver_warnings})
+                "coverage": f"U.S. release schedules from {', '.join(official_sources) or 'official sources'} · Next two weeks · Local times · No consensus forecasts or impact ratings." if official_fallback else "Economic calendar from Finnhub · Times shown in your local timezone.",
+                "warnings": ([warning] if warning else []) + (getattr(self.public, "calendar_warnings", []) if official_fallback else []) + driver_warnings})
 
     async def macro(self) -> dict[str, Any]:
         async def series(series_id: str) -> dict[str, Any]:

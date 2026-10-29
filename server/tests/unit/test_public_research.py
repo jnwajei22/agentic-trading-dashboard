@@ -74,6 +74,23 @@ async def test_official_feeds_use_cache_and_preserve_partial_results():
 
 
 @pytest.mark.asyncio
+async def test_calendar_preserves_bea_when_bls_is_unreachable():
+    _cache.clear()
+    def handler(request):
+        return httpx.Response(503) if "bls.gov" in str(request.url) else httpx.Response(200, text=ICS)
+    client = PublicResearchClient(httpx.MockTransport(handler))
+    try:
+        rows = await client.calendar(date(2026,10,29), date(2026,11,10), 50)
+        assert len(rows) == 2
+        assert {row.source for row in rows} == {"BEA"}
+        assert client.calendar_sources == ["BEA"]
+        assert client.calendar_warnings[0]["provider"] == "BLS"
+    finally:
+        await client.aclose()
+        _cache.clear()
+
+
+@pytest.mark.asyncio
 async def test_workspace_falls_back_without_confusing_official_dates_with_consensus_data():
     class Disabled:
         async def economic_calendar(self, *args):

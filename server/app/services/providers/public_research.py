@@ -20,6 +20,7 @@ _cache = TTLCache()
 FEEDS = (("BLS", "https://www.bls.gov/feed/bls_latest.rss"),
          ("ECB", "https://www.ecb.europa.eu/rss/press.html"))
 CALENDAR = "https://www.bls.gov/schedule/news_release/bls.ics"
+BEA_CALENDAR = "https://www.bea.gov/news/schedule/ics/online-calendar-subscription.ics"
 
 
 def plain(value: str) -> str:
@@ -48,7 +49,7 @@ def parse_news(payload: str, source: str) -> list[MarketNewsItem]:
     return result
 
 
-def parse_calendar(payload: str, start: date, end: date, limit: int) -> list[EconomicEvent]:
+def parse_calendar(payload: str, start: date, end: date, limit: int, source: str = "BLS") -> list[EconomicEvent]:
     if "BEGIN:VCALENDAR" not in payload or "END:VCALENDAR" not in payload:
         raise ValueError("Invalid calendar feed")
     # RFC 5545 folded lines; BLS supplies Eastern time including DST transitions.
@@ -79,7 +80,7 @@ def parse_calendar(payload: str, start: date, end: date, limit: int) -> list[Eco
         if not start <= stamp.astimezone(ZoneInfo("America/New_York")).date() <= end:
             continue
         title = fields["SUMMARY"].replace(r"\,", ",").replace(r"\n", " ").replace(r"\;", ";")
-        events.append(EconomicEvent(event=title[:300], country="US", currency="USD", scheduled_at=stamp.astimezone(timezone.utc), source="BLS"))
+        events.append(EconomicEvent(event=title[:300], country="US", currency="USD", scheduled_at=stamp.astimezone(timezone.utc), source=source))
     unique = {(event.event, event.scheduled_at): event for event in events}
     return sorted(unique.values(), key=lambda event: event.scheduled_at)[:limit]
 
@@ -87,6 +88,8 @@ def parse_calendar(payload: str, start: date, end: date, limit: int) -> list[Eco
 class PublicResearchClient:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.http = httpx.AsyncClient(timeout=10, transport=transport)
+        self.calendar_sources: list[str] = []
+        self.calendar_warnings: list[dict] = []
 
     async def _get(self, url: str) -> str:
         cached = _cache.get(url)
@@ -122,7 +125,21 @@ class PublicResearchClient:
         return sorted(unique.values(), key=lambda item: item.published_at, reverse=True)[:limit], warnings
 
     async def calendar(self, start: date, end: date, limit: int) -> list[EconomicEvent]:
-        return parse_calendar(await self._get(CALENDAR), start, end, limit)
+        feeds = (("BLS", CALENDAR), ("BEA", BEA_CALENDAR))
+        rows = await asyncio.gather(*(self._get(url) for _, url in feeds), return_exceptions=True)
+        events = []
+        self.calendar_sources, self.calendar_warnings = [], []
+        for (source, _), row in zip(feeds, rows):
+            try:
+                if isinstance(row, BaseException):
+                    raise row
+                events.extend(parse_calendar(row, start, end, limit, source))
+                self.calendar_sources.append(source)
+            except Exception:
+                self.calendar_warnings.append({"provider": source, "error": "upstream_failure", "message": f"{source} release dates are temporarily unavailable."})
+        if not self.calendar_sources:
+            raise ProviderError("official_releases", "upstream_failure", "Official release calendars are temporarily unavailable.", retryable=True)
+        return sorted(events, key=lambda item: item.scheduled_at)[:limit]
 
     async def aclose(self) -> None:
         await self.http.aclose()
