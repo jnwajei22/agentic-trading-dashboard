@@ -9,6 +9,15 @@ export const KRAKEN_INTERVALS = [1, 5, 15, 60] as const
 export const krakenSymbol = (instrument: string) => SYMBOLS[instrument] ?? null
 export type KrakenCandle = { time: number; open: number; high: number; low: number; close: number; trades: number }
 export type KrakenTrade = { symbol: string; trade_id: number; timestamp: string; price: number }
+export type KrakenTicker = { symbol: string; last: number; bid: number; ask: number; high: number; low: number; change: number; changePercent: number; volume: number; vwap: number; checkedAt: string; tradeTime: string | null }
+
+export function parseKrakenTicker(row: Record<string, unknown>, symbol: string): KrakenTicker | null {
+  const keys = ["last", "bid", "ask", "high", "low", "change", "change_pct", "volume", "vwap"]
+  if (row.symbol !== symbol || keys.some(key => typeof row[key] !== "number" || !Number.isFinite(row[key]))) return null
+  const n = row as Record<string, number>
+  if (n.last <= 0 || n.bid <= 0 || n.ask < n.bid || n.high < n.low || n.volume < 0) return null
+  return { symbol, last: n.last, bid: n.bid, ask: n.ask, high: n.high, low: n.low, change: n.change, changePercent: n.change_pct, volume: n.volume, vwap: n.vwap, checkedAt: new Date().toISOString(), tradeTime: typeof row.timestamp === "string" ? row.timestamp : null }
+}
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value > 0
 
 function candle(time: number, open: unknown, high: unknown, low: unknown, close: unknown, trades: unknown): KrakenCandle | null {

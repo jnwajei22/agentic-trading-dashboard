@@ -1,5 +1,8 @@
 const PROVIDERS:Record<string,string>={
   finnhub:"Finnhub",
+  kraken:"Kraken",
+  bls:"BLS",
+  ecb:"ECB",
   fred:"FRED",
   tradingview:"TradingView",
   tradelocker:"TradeLocker",

@@ -1,8 +1,16 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { krakenSymbol, mergeKrakenCandles, parseKrakenCandles, parseKrakenHistory, parseKrakenTrades } from "../lib/afd/kraken-market-data"
+import { krakenSymbol, mergeKrakenCandles, parseKrakenCandles, parseKrakenHistory, parseKrakenTrades, parseKrakenTicker } from "../lib/afd/kraken-market-data"
 
 const bar = (time: number, close = 1.12, trades = 1) => ({ time, open: 1.12, high: Math.max(1.12, close), low: Math.min(1.12, close), close, trades })
+test("ticker rejects mismatched markets, nonfinite values and crossed quotes", () => {
+  const row = { symbol: "EUR/USD", last: 1.12, bid: 1.119, ask: 1.121, high: 1.13, low: 1.11, change: 0, change_pct: 0, volume: 0, vwap: 1.12 }
+  assert.equal(parseKrakenTicker(row, "EUR/USD")?.changePercent, 0)
+  assert.equal(parseKrakenTicker(row, "EUR/USD")?.volume, 0)
+  assert.equal(parseKrakenTicker(row, "GBP/USD"), null)
+  assert.equal(parseKrakenTicker({ ...row, ask: 1 }, "EUR/USD"), null)
+  assert.equal(parseKrakenTicker({ ...row, last: NaN }, "EUR/USD"), null)
+})
 test("unsupported forex and CFDs never silently map to a different instrument", () => {
   assert.equal(krakenSymbol("forex:EUR/USD"), "EUR/USD")
   assert.equal(krakenSymbol("forex:NZD/USD"), null)

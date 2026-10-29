@@ -8,6 +8,7 @@ from typing import Any, Awaitable
 from app.services.providers.errors import ProviderError
 from app.services.providers.finnhub import FinnhubClient
 from app.services.providers.fred import FredClient
+from app.services.providers.public_research import PublicResearchClient
 from app.services.instruments import DEFAULT_FOREX_MAJORS, InstrumentMappingError, instrument_mapper
 
 
@@ -33,9 +34,10 @@ MACRO_SERIES = tuple(item[0] for item in CURRENCY_DRIVERS["USD"])
 class MarketWorkspaceService:
     """Provider-agnostic market reads with partial-failure responses safe for browsers."""
 
-    def __init__(self, finnhub: FinnhubClient | None = None, fred: FredClient | None = None) -> None:
+    def __init__(self, finnhub: FinnhubClient | None = None, fred: FredClient | None = None, public: PublicResearchClient | None = None) -> None:
         self.finnhub = finnhub or FinnhubClient()
         self.fred = fred or FredClient()
+        self.public = public or PublicResearchClient()
 
     @staticmethod
     def _stamp(payload: dict[str, Any]) -> dict[str, Any]:
@@ -88,8 +90,13 @@ class MarketWorkspaceService:
 
     async def news(self, category: str = "general", limit: int = 20) -> dict[str, Any]:
         items, warning = await self._partial("Finnhub", self.finnhub.market_news(category, limit), [])
+        if warning:
+            official, warnings = await self.public.news(limit)
+            return self._stamp({"items": [item.model_dump(mode="json") for item in official],
+                "sources": sorted({item.source_name for item in official}), "warnings": warnings,
+                "coverage": "Official U.S. economic releases and ECB announcements. Broader market headlines require a configured news provider."})
         return self._stamp({"items": [item.model_dump(mode="json") for item in items], "sources": ["Finnhub"],
-                "warnings": [warning] if warning else []})
+                "warnings": [], "coverage": "Market headlines supplied by Finnhub."})
 
     @staticmethod
     def _currencies(instrument: Any) -> tuple[str, ...]:
@@ -125,6 +132,9 @@ class MarketWorkspaceService:
     async def calendar(self, start: date, end: date, limit: int = 50,
                        canonical_id: str | None = None) -> dict[str, Any]:
         items, warning = await self._partial("Finnhub", self.finnhub.economic_calendar(start, end, limit), [])
+        official_fallback = warning is not None
+        if official_fallback:
+            items, warning = await self._partial("BLS", self.public.calendar(start, end, limit), [])
         instrument = instrument_mapper.resolve(canonical_id) if canonical_id else None
         currencies = self._currencies(instrument) if instrument else ()
         drivers, driver_warnings = await self._drivers(instrument) if instrument else ([], [])
@@ -143,12 +153,13 @@ class MarketWorkspaceService:
             normalized.append({"title": title, "country": row.get("country"), "currency": currency or None,
                 "scheduled_time": row.get("scheduled_at"), "impact": row.get("impact"),
                 "previous": row.get("previous"), "estimate": row.get("estimate"), "actual": row.get("actual"),
-                "unit": row.get("unit"), "source": "Finnhub", "related_canonical_instruments": [canonical_id] if related else [],
+                "unit": row.get("unit"), "source": row.get("source") or "Finnhub", "related_canonical_instruments": [canonical_id] if related else [],
                 "associated_fred_series": context, "relevant": related,
                 "relevance_label": f"Relevant to {currency} side of {instrument.symbol}" if related else None})
         normalized.sort(key=lambda row: (not row["relevant"], str(row.get("scheduled_time") or "")))
-        sources = ["Finnhub"] + (["FRED"] if drivers else [])
+        sources = (["BLS"] if official_fallback else ["Finnhub"]) + (["FRED"] if drivers else [])
         return self._stamp({"items": normalized, "sources": sources,
+                "coverage": "U.S. economic releases from BLS · Next two weeks · Local times · No consensus forecasts or provider impact ratings." if official_fallback else "Economic calendar from Finnhub · Times shown in your local timezone.",
                 "warnings": ([warning] if warning else []) + driver_warnings})
 
     async def macro(self) -> dict[str, Any]:
@@ -211,4 +222,4 @@ class MarketWorkspaceService:
             "partial": stale or normalized is None or bool(driver_warnings)}
 
     async def aclose(self) -> None:
-        await asyncio.gather(self.finnhub.aclose(), self.fred.aclose())
+        await asyncio.gather(self.finnhub.aclose(), self.fred.aclose(), self.public.aclose())

@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import { CandlestickSeries, ColorType, createChart, type UTCTimestamp } from "lightweight-charts"
 import { Button } from "@/components/ui/button"
-import { KRAKEN_INTERVALS, mergeKrakenCandles, parseKrakenCandles, parseKrakenTrades, type KrakenCandle, type KrakenTrade } from "@/lib/afd/kraken-market-data"
+import { KRAKEN_INTERVALS, mergeKrakenCandles, parseKrakenCandles, parseKrakenTrades, parseKrakenTicker, type KrakenCandle, type KrakenTrade, type KrakenTicker } from "@/lib/afd/kraken-market-data"
 
 type FeedState = { status: string; trades: number; candleUpdates: number; lastTrade: KrakenTrade | null; candle: KrakenCandle | null; historyError: boolean }
 const INITIAL: FeedState = { status: "Connecting…", trades: 0, candleUpdates: 0, lastTrade: null, candle: null, historyError: false }
 
-export function KrakenMarketChart({ instrument, symbol, label }: { instrument: string; symbol: string; label: string }) {
+export function KrakenMarketChart({ instrument, symbol, label, onTicker }: { instrument: string; symbol: string; label: string; onTicker?: (ticker: KrakenTicker) => void }) {
   const container = useRef<HTMLDivElement>(null)
   const { resolvedTheme } = useTheme()
   const [interval, setIntervalMinutes] = useState(5)
@@ -38,6 +38,8 @@ export function KrakenMarketChart({ instrument, symbol, label }: { instrument: s
     let backoff = 1000
     let fitted = false
     let historyFitted = false
+    let tickerTimer: ReturnType<typeof setTimeout> | undefined
+    let pendingTicker: KrakenTicker | null = null
     const seenTrades = new Set<number>()
     setFeed(INITIAL)
 
@@ -82,6 +84,7 @@ export function KrakenMarketChart({ instrument, symbol, label }: { instrument: s
       connection.onopen = () => {
         connection.send(JSON.stringify({ method: "subscribe", params: { channel: "ohlc", symbol: [symbol], interval, snapshot: true } }))
         connection.send(JSON.stringify({ method: "subscribe", params: { channel: "trade", symbol: [symbol], snapshot: false } }))
+        connection.send(JSON.stringify({ method: "subscribe", params: { channel: "ticker", symbol: [symbol], event_trigger: "bbo", snapshot: true } }))
         void loadHistory(connection)
       }
       connection.onmessage = event => {
@@ -89,6 +92,10 @@ export function KrakenMarketChart({ instrument, symbol, label }: { instrument: s
         lastMessage = Date.now()
         try {
           const message = JSON.parse(event.data)
+          if (message.channel === "ticker" && Array.isArray(message.data)) {
+            for (const row of message.data) pendingTicker = parseKrakenTicker(row, symbol) ?? pendingTicker
+            if (!tickerTimer) tickerTimer = setTimeout(() => { tickerTimer = undefined; if (!stopped && pendingTicker) onTicker?.(pendingTicker) }, 250)
+          }
           if (message.method === "subscribe") {
             if (!message.success) { setFeed(current => ({ ...current, status: "Kraken rejected this subscription. Reconnect to retry." })); connection.onclose = null; connection.close(); return }
             acknowledged.add(message.result?.channel)
@@ -129,12 +136,12 @@ export function KrakenMarketChart({ instrument, symbol, label }: { instrument: s
     document.addEventListener("visibilitychange", resume)
     window.addEventListener("online", resume)
     return () => {
-      stopped = true; clearTimeout(retryTimer); clearInterval(watchdog); historyRequest?.abort()
+      stopped = true; clearTimeout(retryTimer); clearTimeout(tickerTimer); clearInterval(watchdog); historyRequest?.abort()
       if (socket) { socket.onclose = null; socket.close() }
       document.removeEventListener("visibilitychange", resume); window.removeEventListener("online", resume)
       chart.remove()
     }
-  }, [instrument, symbol, interval, retry, resolvedTheme, precision])
+  }, [instrument, symbol, interval, retry, resolvedTheme, precision, onTicker])
 
   return <div data-testid="kraken-chart" data-trades={feed.trades} data-candle-updates={feed.candleUpdates} data-last-trade-id={feed.lastTrade?.trade_id} data-candle-time={feed.candle?.time} data-candle-close={feed.candle?.close}>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -145,6 +152,6 @@ export function KrakenMarketChart({ instrument, symbol, label }: { instrument: s
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground"><p role="status">{feed.status} · {feed.trades} live trades received</p><Button variant="ghost" size="sm" className="h-7 rounded-full text-[11px]" onClick={() => setRetry(value => value + 1)}>Reconnect</Button></div>
     <p className="mt-1 text-[11px] text-muted-foreground">Kraken exchange prices differ from your broker’s execution quotes. Candles change when trades occur.</p>
     {feed.historyError && <p role="alert" className="mt-2 text-xs text-amber-600">Historical candles could not load. Streamed candles are still shown; reconnect to retry history.</p>}
-    <details className="mt-2 text-[10px] text-muted-foreground"><summary className="cursor-pointer">Feed details</summary><p className="mt-1">{feed.candleUpdates} streamed candle updates · Candle close {feed.candle?.close.toFixed(precision) ?? "—"}</p><p>Last trade {feed.lastTrade ? `#${feed.lastTrade.trade_id} · ${feed.lastTrade.timestamp}` : "Waiting for the next trade; a connected socket does not imply trading activity."}</p><p>Chart uses TradingView Lightweight Charts. No TradingView market-data widget or broker polling is used for this source.</p></details>
+    <details className="mt-2 text-[10px] text-muted-foreground"><summary className="cursor-pointer">Feed details</summary><p className="mt-1">{feed.candleUpdates} streamed candle updates · Candle close {feed.candle?.close.toFixed(precision) ?? "—"}</p><p>Last trade {feed.lastTrade ? `#${feed.lastTrade.trade_id} · ${feed.lastTrade.timestamp}` : "Waiting for the next trade; a connected socket does not imply trading activity."}</p></details>
   </div>
 }

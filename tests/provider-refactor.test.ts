@@ -37,7 +37,7 @@ test("Markets selection is canonical interactive and race safe", () => {
   assert.match(workspace, /searchParams\.get\("instrument"\)/)
   assert.match(workspace, /AbortController/)
   assert.match(workspace, /sequence !== requestSequence\.current/)
-  assert.match(workspace, /key=\{tradingViewSymbol\}/)
+  assert.match(workspace, /key=\{selected\}/)
   assert.doesNotMatch(workspace, /router\.refresh/)
 })
 
