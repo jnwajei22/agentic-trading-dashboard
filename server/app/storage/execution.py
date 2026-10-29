@@ -499,6 +499,12 @@ class ExecutionRepository:
                 row=db.execute("SELECT * FROM demo_action_executions WHERE preview_id=? OR (user_sub=? AND idempotency_key=?)",(preview_id,user_sub,idempotency_key)).fetchone()
             return False,self._decode(row) if row else {}
 
+    def get_action_submission(self, user_sub: str, preview_id: str, idempotency_key: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row=db.execute("SELECT id FROM demo_action_executions WHERE user_sub=? AND (preview_id=? OR idempotency_key=?)",
+                           (user_sub, preview_id, idempotency_key)).fetchone()
+        return self.get_action_execution(user_sub, row["id"]) if row else None
+
     def update_action_execution(self, execution_id:str, *, state:str, broker_response:dict|None=None,
                                 reconciliation:dict|None=None,error_category:str|None=None) -> None:
         with self._connect() as db:

@@ -6,6 +6,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.forex import router as forex_router
 from app.api.routes.platform import router as platform_router
 from app.api.routes.agent import router as agent_router
+from app.api.routes.trading import router as trading_router
 from app.webhooks.tradingview import router as tradingview_router
 from app.config.settings import settings
 from app.storage.database import check_database, DatabaseUnavailable
@@ -41,4 +42,5 @@ app.include_router(health_router)
 app.include_router(forex_router)
 app.include_router(platform_router)
 app.include_router(agent_router)
+app.include_router(trading_router)
 app.include_router(tradingview_router, prefix="/webhooks", tags=["webhooks"])

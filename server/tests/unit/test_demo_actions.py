@@ -58,3 +58,24 @@ async def test_kill_switch_does_not_block_validated_risk_reduction(tmp_path,monk
     service,profile,_=configured(tmp_path,monkeypatch);monkeypatch.setattr(settings,"kill_switch_enabled",True)
     preview=await service.review_action("user",profile,"cancel_order","order-1")
     assert (await service.submit_action("user",preview["preview_id"],"idempotency-123"))["status"]=="verified"
+
+@pytest.mark.asyncio
+async def test_action_retry_after_expiry_returns_original_result_without_dispatch(tmp_path, monkeypatch):
+    service,profile,client=configured(tmp_path,monkeypatch)
+    preview=await service.review_action("user",profile,"cancel_order","order-1")
+    first=await service.submit_action("user",preview["preview_id"],"idempotency-123")
+    with service.execution._connect() as db:
+        db.execute("UPDATE demo_action_previews SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (preview["preview_id"],))
+    second=await service.submit_action("user",preview["preview_id"],"idempotency-123")
+    assert second["execution_id"] == first["execution_id"] and client.cancel_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_action_idempotency_key_cannot_target_another_preview(tmp_path, monkeypatch):
+    service,profile,client=configured(tmp_path,monkeypatch)
+    cancel=await service.review_action("user",profile,"cancel_order","order-1")
+    close=await service.review_action("user",profile,"close_position","position-1")
+    await service.submit_action("user",cancel["preview_id"],"idempotency-123")
+    with pytest.raises(AutonomousExecutionError) as error:
+        await service.submit_action("user",close["preview_id"],"idempotency-123")
+    assert error.value.code == "idempotency_conflict" and client.close_calls == 0

@@ -250,6 +250,7 @@ def calculate_broker_position_size(
     quote_to_account_rate: float, spread: float = 0.0,
     commission_per_lot: float = 0.0, risk_base_amount: float | None = None,
     remaining_allocation_margin: float | None = None,
+    requested_lots: float | None = None,
 ) -> dict[str, float]:
     if balance <= 0 or available_funds <= 0:
         raise AutonomousExecutionError("insufficient_account_funds", "Account balance and available funds must be positive.", status="rejected")
@@ -268,6 +269,13 @@ def calculate_broker_position_size(
     raw_lots = risk_budget / risk_per_lot
     step = Decimal(str(metadata.lot_step))
     lots = float((Decimal(str(raw_lots)) / step).to_integral_value(rounding=ROUND_DOWN) * step)
+    if requested_lots is not None:
+        requested = Decimal(str(requested_lots))
+        if not requested.is_finite() or requested <= 0 or requested % step != 0:
+            raise AutonomousExecutionError("invalid_quantity", "Quantity must match the broker lot increment.", status="rejected")
+        lots = float(requested)
+        if lots * risk_per_lot > risk_budget + 1e-8:
+            raise AutonomousExecutionError("risk_limit_exceeded", "The requested quantity exceeds the execution profile risk limit. Reduce quantity or stop distance.", status="rejected")
     if lots < metadata.min_lots or (metadata.max_lots is not None and lots > metadata.max_lots):
         raise AutonomousExecutionError("position_size_unverifiable", "The calculated size violates broker quantity limits.", status="rejected")
     estimated = lots * risk_per_lot
@@ -840,7 +848,9 @@ class AutonomousDemoService:
                     raise
         raise AutonomousExecutionError("position_size_unverifiable", "A fresh currency-conversion quote is unavailable.", status="rejected")
 
-    async def review(self, user_sub: str, profile_ref: str, proposal: AutonomousOrderProposal, *, autonomous: bool=False) -> dict[str, Any]:
+    async def review(self, user_sub: str, profile_ref: str, proposal: AutonomousOrderProposal, *, autonomous: bool=False, requested_lots: float | None=None) -> dict[str, Any]:
+        if autonomous and requested_lots is not None:
+            raise AutonomousExecutionError("invalid_quantity", "Autonomous sizing is controlled by the server.", status="rejected")
         context = await self.context(user_sub, profile_ref, allow_autonomous=autonomous)
         if autonomous:
             controls=self.execution.get_autonomous_controls(user_sub)
@@ -921,6 +931,7 @@ class AutonomousDemoService:
             commission_per_lot=metadata.commission_per_lot,
             risk_base_amount=float(normalized["risk_state"]["capital_state"]["risk_base_amount"]),
             remaining_allocation_margin=float(normalized["risk_state"]["capital_state"]["remaining_margin_budget"]),
+            requested_lots=requested_lots,
         )
         preview_id, now = f"preview_{uuid4().hex}", utcnow()
         estimated_reward = size["lot_size"] * float(calculation["reward_distance"]) * metadata.contract_size * quote_to_account
@@ -1103,10 +1114,10 @@ class AutonomousDemoService:
                     order_payload["price"] = 0
                 response: Any = None
                 ambiguous_submit_error: TradeLockerError | None = None
+                if before_dispatch: before_dispatch()
                 try:
                     # The durable claim already exists. Never call place_order again for this preview/key.
                     response = await client.place_order(order_payload)
-                    if before_dispatch: before_dispatch()
                     dispatched = True
                 except TradeLockerError as exc:
                     ambiguous = (
@@ -1115,7 +1126,6 @@ class AutonomousDemoService:
                     )
                     if exc.operation != "place_order" or not ambiguous:
                         raise
-                    if before_dispatch: before_dispatch()
                     dispatched = True
                     ambiguous_submit_error = exc
                 reconciliation = await self._poll_reconciliation(
@@ -1452,6 +1462,11 @@ class AutonomousDemoService:
     async def submit_action(self,user_sub:str,preview_id:str,idempotency_key:str,*,before_dispatch=None)->dict[str,Any]:
         preview=self.execution.get_action_preview(preview_id)
         if not preview or preview["user_sub"]!=user_sub: raise AutonomousExecutionError("preview_not_found","The action preview is unavailable.",status="rejected")
+        existing = self.execution.get_action_submission(user_sub, preview_id, idempotency_key)
+        if existing:
+            if existing["preview_id"] != preview_id or existing["idempotency_key"] != idempotency_key:
+                raise AutonomousExecutionError("idempotency_conflict", "The idempotency key belongs to another request.", status="rejected")
+            return self._action_result(existing)
         if preview["status"]!="approved" or datetime.fromisoformat(preview["expires_at"])<=utcnow():
             raise AutonomousExecutionError("preview_expired_or_unapproved","The action preview is expired or not approved.",status="rejected")
         context=await self.context(user_sub,preview["profile_ref"])
@@ -1460,7 +1475,10 @@ class AutonomousDemoService:
         if current!=stored: raise AutonomousExecutionError("preview_account_mismatch","The action preview routing no longer matches its profile-bound demo account.",status="rejected")
         execution_id=f"exec_{uuid4().hex}"
         claimed,existing=self.execution.claim_action(execution_id,preview_id,user_sub,idempotency_key,preview["action_type"],preview["target_id"])
-        if not claimed:return self._action_result(existing)
+        if not claimed:
+            if existing.get("preview_id") != preview_id or existing.get("idempotency_key") != idempotency_key:
+                raise AutonomousExecutionError("idempotency_conflict", "The idempotency key belongs to another request.", status="rejected")
+            return self._action_result(existing)
         client=self._client(context.connection, context);dispatched=False
         try:
             config=await client.get_config()

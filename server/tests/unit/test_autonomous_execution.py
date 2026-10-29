@@ -858,3 +858,33 @@ async def test_unknown_consumes_key_and_later_read_only_lookup_reconciles(tmp_pa
     assert reconciled["broker_order_id"] == "432345564236299554"
     assert client.place_order_calls == 1
     assert repository.get_submission(idempotency_key="manual:durable-key")["submission_state"] == "verified"
+
+@pytest.mark.parametrize("lots", [.001, -.01, float("nan"), float("inf")])
+def test_manual_quantity_rejects_invalid_increment_and_nonfinite_values(lots):
+    with pytest.raises(AutonomousExecutionError):
+        calculate_broker_position_size(balance=10000, available_funds=10000, risk_percent=1,
+            entry=1.1, stop_loss=1.099, metadata=metadata(), quote_to_account_rate=1, requested_lots=lots)
+
+
+def test_manual_quantity_is_exact_and_cannot_exceed_profile_risk():
+    args=dict(balance=10000, available_funds=10000, risk_percent=1,
+        entry=1.1, stop_loss=1.099, metadata=metadata(), quote_to_account_rate=1)
+    result=calculate_broker_position_size(**args, requested_lots=.03)
+    assert result["lot_size"] == .03 and result["quantity"] == 3000
+    assert result["estimated_risk"] == pytest.approx(3)
+    with pytest.raises(AutonomousExecutionError) as error:
+        calculate_broker_position_size(**args, requested_lots=1.01)
+    assert error.value.code == "risk_limit_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_revoked_authorization_never_dispatches_and_consumes_claim(tmp_path, monkeypatch):
+    client=SubmissionClient(visible_after_order_read=2)
+    service, repository, preview_id, _=submission_service(tmp_path, monkeypatch, client, origin="manual")
+    def deny():
+        raise AutonomousExecutionError("authorization_revoked", "Execution permission changed.", status="rejected")
+    with pytest.raises(AutonomousExecutionError) as error:
+        await service.submit("user", preview_id, "manual:revoked-key", before_dispatch=deny)
+    assert error.value.code == "authorization_revoked"
+    assert client.place_order_calls == 0
+    assert repository.get_submission(preview_id=preview_id)["submission_state"] == "rejected"

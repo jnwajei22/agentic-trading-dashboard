@@ -13,8 +13,12 @@ const exact: Record<string, readonly string[]> = {
   "assistant/conversations": ["GET"],
   "providers": ["GET"], "trading/connections": ["GET"], "trading/accounts": ["GET"],
   "trading/order-calculations": ["POST"],
+  "trading/order-previews": ["POST"], "trading/order-submissions": ["POST"],
+  "trading/action-previews": ["POST"], "trading/action-submissions": ["POST"],
+  "trading/account-activity": ["GET"],
 }
 const dynamic: Array<[RegExp, readonly string[]]> = [
+  [/^trading\/executions\/[^/]+$/, ["GET"]],
   [/^broker\/accounts\/[^/]+\/(alias|default|disable|enable)$/, ["PUT"]],
   [/^broker\/connections\/[^/]+\/disable$/, ["PUT"]],
   [/^broker\/connections\/[^/]+$/, ["DELETE"]],

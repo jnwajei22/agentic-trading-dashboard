@@ -65,11 +65,11 @@ class AccountSelection(BaseModel):
 
 class CalculationValue(BaseModel):
     mode: Literal["price", "pips", "reward_multiple", "rr"]
-    value: float = Field(gt=0)
+    value: float = Field(gt=0, allow_inf_nan=False)
 
 
 class CalculationQuantity(BaseModel):
-    value: float = Field(gt=0)
+    value: float = Field(gt=0, allow_inf_nan=False)
     unit: Literal["lot", "share", "contract", "fractional_share"] = "lot"
 
 
