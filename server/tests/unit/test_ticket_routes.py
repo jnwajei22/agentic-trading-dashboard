@@ -46,17 +46,14 @@ def test_broker_rows_preserve_zero_and_strip_unneeded_fields():
 @pytest.mark.asyncio
 async def test_preview_uses_fresh_snapshot_and_exact_requested_quantity(monkeypatch):
     setup(monkeypatch)
-    async def calculate(*_):
-        return {"blocking_reasons":[], "quote":{"stale":False}, "pip_size":.0001, "price_precision":5}
     seen={}
     class Engine:
         async def snapshot(self, user, ref, pair):
-            return {"snapshot_id":"snapshot", "market":{"pairs":{"EURUSD":{"quote":{"bid":1.1, "ask":1.1002}}}}}
+            return {"snapshot_id":"snapshot", "market":{"pairs":{"EURUSD":{"quote":{"bid":1.1, "ask":1.1002},"instrument_metadata":{"pip_size":.0001,"price_precision":5}}}}}
         _quote=staticmethod(lambda q:(q["bid"], q["ask"]))
         async def review(self, user, ref, proposal, **kwargs):
             seen.update(proposal=proposal, **kwargs)
             return {"preview_id":"preview", "lot_size":kwargs["requested_lots"]}
-    monkeypatch.setattr(trading, "trading_order_calculations", calculate)
     monkeypatch.setattr(trading, "AutonomousDemoService", Engine)
     payload=trading.TicketPreview(profile_ref="profile", account_id="account-a", instrument_id="forex:EUR/USD", side="buy",
         quantity={"value":.01,"unit":"lot"}, stop_loss={"mode":"pips","value":20}, take_profit={"mode":"reward_multiple","value":2})

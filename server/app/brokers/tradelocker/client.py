@@ -436,12 +436,26 @@ class TradeLockerClient:
 
     async def get_quote(self, symbol: str) -> Any:
         instrument_id, route_id = await self._resolve_instrument(symbol)
-        return await self._optional_get(
-            "/trade/quotes",
-            operation="get_quote",
-            headers=self._account_headers(),
-            params={"tradableInstrumentId": instrument_id, "routeId": route_id},
-        )
+        async def read():
+            return await self._optional_get("/trade/quotes", operation="get_quote",
+                headers=self._account_headers(), params={"tradableInstrumentId":instrument_id,"routeId":route_id})
+        if not (self.cache_user_id and self.cache_connection_id and self.cache_account_record_id):
+            return await read()
+        scope="quotes:"+self.cache_connection_id+":"+self.cache_account_record_id
+        for attempt in range(2):
+            lease=await self.request_limiter.acquire(scope)
+            try:
+                result=await read()
+                self.request_limiter.set_cooldown(scope,1.0)
+                return result
+            except TradeLockerError as exc:
+                if exc.status_code != 429: raise
+                delay=float(exc.details.get("retry_after_seconds") or 2)
+                self.request_limiter.set_cooldown(scope,delay)
+                if attempt or delay > settings.tradelocker_rate_limit_max_backoff_seconds: raise
+            finally:
+                self.request_limiter.release(lease)
+        raise AssertionError("quote retry exhausted")
 
     async def _history_page(
         self,

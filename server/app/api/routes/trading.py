@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.routes.platform import OrderCalculationRequest, current_claims, trading_order_calculations
+from app.api.routes.platform import OrderCalculationRequest, current_claims
 from app.brokers.tradelocker.client import TradeLockerClient, TradeLockerError
 from app.brokers.tradelocker.mapping import TradeLockerMappingError, map_configured_rows
 from app.models.autonomous import AutonomousOrderProposal
@@ -70,24 +70,25 @@ async def preview_ticket(payload: TicketPreview, claims=Depends(current_claims))
         raise HTTPException(409, "This ticket currently supports market orders sized in lots.")
     if payload.stop_loss is None or payload.take_profit is None:
         raise HTTPException(422, "A stop loss and take profit are required before review.")
-    calculation = await trading_order_calculations(payload, claims)
-    if calculation["blocking_reasons"] or calculation["quote"]["stale"]:
-        raise HTTPException(409, {"message": "Refresh or correct the order before review.", "blocking_reasons": calculation["blocking_reasons"]})
     service = AutonomousDemoService()
     try:
         canonical = instrument_mapper.resolve(payload.instrument_id)
+        if canonical.asset_class != "forex":
+            raise HTTPException(409, "This ticket currently supports forex instruments.")
         pair = normalize_pair(canonical.symbol)
         snapshot = await service.snapshot(user, payload.profile_ref, pair)
         bid, ask = service._quote(snapshot["market"]["pairs"][pair]["quote"])
         entry = ask if payload.side == "buy" else bid
-        stop = _derived_price(payload.stop_loss.model_dump(), entry, calculation["pip_size"], payload.side, protective=True)
-        distance = abs(entry-stop)/calculation["pip_size"] if stop is not None else None
-        target = _target_price(payload.take_profit.model_dump(), entry, calculation["pip_size"], payload.side, distance)
+        metadata = snapshot["market"]["pairs"][pair]["instrument_metadata"]
+        pip_size, precision = metadata["pip_size"], metadata["price_precision"]
+        stop = _derived_price(payload.stop_loss.model_dump(), entry, pip_size, payload.side, protective=True)
+        distance = abs(entry-stop)/pip_size if stop is not None else None
+        target = _target_price(payload.take_profit.model_dump(), entry, pip_size, payload.side, distance)
         if stop is None or target is None:
             raise HTTPException(422, "A valid stop loss and take profit are required.")
         proposal = AutonomousOrderProposal(snapshot_id=snapshot["snapshot_id"], pair=pair,
             side="long" if payload.side == "buy" else "short", entry=entry,
-            stop_loss=_round(stop, calculation["price_precision"]), take_profit=_round(target, calculation["price_precision"]),
+            stop_loss=_round(stop, precision), take_profit=_round(target, precision),
             reason_codes=["manual_ticket"])
         approved = await service.review(user, payload.profile_ref, proposal, requested_lots=payload.quantity.value)
         # These frozen values are the actual immutable server preview, not the earlier estimate.

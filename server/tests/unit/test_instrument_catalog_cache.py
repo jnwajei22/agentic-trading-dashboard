@@ -33,3 +33,32 @@ async def test_catalog_expires_invalidates_and_does_not_cache_failures():
     for _ in range(2):
         with pytest.raises(RuntimeError): await cache.get(("other",),bad)
     assert bad.await_count==2
+
+
+@pytest.mark.asyncio
+async def test_scoped_quote_honors_read_cooldown_without_caching_prices():
+    import httpx
+    from app.brokers.tradelocker.client import TradeLockerClient
+    from app.services.tradelocker.catalog_cache import instrument_catalog_cache
+    instrument_catalog_cache.invalidate_user('quote-retry-test')
+    calls=[]; cooldowns=[]
+    class Limiter:
+        async def acquire(self, scope): return scope
+        def release(self, lease): pass
+        def set_cooldown(self, scope, delay): cooldowns.append(delay)
+    def route(request):
+        calls.append((request.method, request.url.path))
+        if request.url.path.endswith('/auth/jwt/token'): return httpx.Response(200,json={'accessToken':'token'})
+        if request.url.path.endswith('/instruments'): return httpx.Response(200,json={'d':{'instruments':[{'id':42,'name':'EURUSD','routes':[{'id':'r1','type':'INFO'}]}]}})
+        count=sum(path.endswith('/quotes') for _,path in calls)
+        if count==1: return httpx.Response(429,headers={'Retry-After':'2'})
+        return httpx.Response(200,json={'d':{'bp':1.1+count/10000,'ap':1.1002+count/10000}})
+    async with TradeLockerClient(base_url='https://demo.tradelocker.test/backend-api',username='u',password='p',server='s',
+        account_id='a',account_number='1',transport=httpx.MockTransport(route),request_limiter=Limiter(),
+        cache_user_id='quote-retry-test',cache_connection_id='connection',cache_account_record_id='account') as client:
+        first=await client.get_quote('EURUSD'); second=await client.get_quote('EURUSD')
+    assert first != second
+    assert sum(path.endswith('/quotes') for _,path in calls)==3
+    assert sum(path.endswith('/instruments') for _,path in calls)==1
+    assert cooldowns == [2,1,1]
+    assert all(method=='GET' or path.endswith('/auth/jwt/token') for method,path in calls)

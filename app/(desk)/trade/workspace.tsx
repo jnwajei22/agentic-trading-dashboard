@@ -56,7 +56,7 @@ export function TradeWorkspace(){
     quantity:{value:ticket.quantity,unit:"lot"},stop_loss:ticket.stopLoss.value?{mode:ticket.stopLoss.mode,value:Number(ticket.stopLoss.value)}:null,
     take_profit:ticket.takeProfit.value?{mode:ticket.takeProfit.mode,value:Number(ticket.takeProfit.value)}:null}),[ticket.accountId,ticket.instrument,ticket.side,ticket.orderType,ticket.quantity,ticket.stopLoss,ticket.takeProfit])
   useEffect(()=>{
-    if(activeTab!=="ticket")return
+    if(activeTab!=="ticket"||reviewing)return
     if(!payload.account_id||!payload.instrument_id||ticket.preview)return
     const controller=new AbortController();const current=++sequence.current;let timer:ReturnType<typeof setTimeout>;let stopped=false
     const run=async()=>{if(stopped)return;if(document.hidden){timer=setTimeout(run,15000);return}setLoading(true)
@@ -64,7 +64,7 @@ export function TradeWorkspace(){
       catch(cause){if(!controller.signal.aborted&&current===sequence.current)setError(cause instanceof BrowserAfdError&&cause.status===404?"Order calculations are not available for this account or instrument.":cause instanceof Error?cause.message:"Order calculations are unavailable.")}
       finally{if(current===sequence.current)setLoading(false);if(!stopped)timer=setTimeout(run,5000)}}
     timer=setTimeout(run,350);return()=>{stopped=true;clearTimeout(timer);controller.abort()}
-  },[payload,ticket.preview,activeTab])
+  },[payload,ticket.preview,activeTab,reviewing])
   const update=(change:Partial<Ticket>)=>{reviewSequence.current++;setReviewing(false);setReviewError("");setTicket(current=>({...current,...change,preview:null}))}
   async function review(){
     const current=++reviewSequence.current;setReviewing(true);setReviewError("")
