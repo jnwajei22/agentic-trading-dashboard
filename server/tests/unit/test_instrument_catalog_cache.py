@@ -43,6 +43,7 @@ async def test_scoped_quote_honors_read_cooldown_without_caching_prices():
     instrument_catalog_cache.invalidate_user('quote-retry-test')
     calls=[]; cooldowns=[]
     class Limiter:
+        def state(self, scope): return {"cooldown_epoch":0}
         async def acquire(self, scope): return scope
         def release(self, lease): pass
         def set_cooldown(self, scope, delay): cooldowns.append(delay)
@@ -62,3 +63,19 @@ async def test_scoped_quote_honors_read_cooldown_without_caching_prices():
     assert sum(path.endswith('/instruments') for _,path in calls)==1
     assert cooldowns == [2,1,1]
     assert all(method=='GET' or path.endswith('/auth/jwt/token') for method,path in calls)
+
+
+@pytest.mark.asyncio
+async def test_long_quote_cooldown_returns_immediately_without_waiting_or_requesting():
+    import time
+    from types import SimpleNamespace
+    from app.brokers.tradelocker.client import TradeLockerClient, TradeLockerError
+    limiter=SimpleNamespace(state=lambda _: {'cooldown_epoch':time.time()+3600},acquire=AsyncMock())
+    async with TradeLockerClient(base_url='https://demo.tradelocker.test/backend-api',username='u',password='p',server='s',
+        account_id='a',account_number='1',request_limiter=limiter,
+        cache_user_id='cooldown-test',cache_connection_id='connection',cache_account_record_id='account') as client:
+        client._resolve_instrument=AsyncMock(return_value=(42,'route'))
+        client._optional_get=AsyncMock()
+        with pytest.raises(TradeLockerError) as error: await client.get_quote('EURUSD')
+        assert error.value.code=='rate_limited' and error.value.details['retry_after_seconds'] > 3500
+        limiter.acquire.assert_not_awaited(); client._optional_get.assert_not_awaited()

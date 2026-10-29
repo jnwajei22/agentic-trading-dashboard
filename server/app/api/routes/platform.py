@@ -497,7 +497,10 @@ async def trading_order_calculations(payload:OrderCalculationRequest,claims:dict
                         if conversion_bid and conversion_ask:rate=2/(conversion_bid+conversion_ask)
                     except TradeLockerError:pass
     except HTTPException:raise
-    except TradeLockerError as exc:raise HTTPException(status_code=502,detail={"error":exc.code,"message":"Authoritative broker calculation data is unavailable."}) from None
+    except TradeLockerError as exc:
+        cooldown=math.ceil(float(exc.details.get("retry_after_seconds") or 0))
+        message=(f"Broker prices are cooling down. Retry in {cooldown} seconds." if exc.status_code==429 and cooldown else "Authoritative broker calculation data is unavailable.")
+        raise HTTPException(status_code=503 if exc.status_code==429 else 502,detail={"error":exc.code,"message":message,"retryable":exc.status_code==429}) from None
     metadata={"pip_size":_quote_number(raw,{"pipsize"}),"tick_size":normalized.get("tick_size"),
         "price_precision":_quote_number(raw,{"priceprecision","digits","decimalplaces"}),
         "contract_size":normalized.get("contract_size"),"quantity_step":normalized.get("quantity_increment"),

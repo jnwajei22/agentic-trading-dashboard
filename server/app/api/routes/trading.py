@@ -179,7 +179,9 @@ async def account_activity(account_id: str, view: Literal["positions", "pending"
             data = await {"positions": client.get_open_positions, "pending": client.get_orders, "history": client.get_orders_history}[view]()
             rows = map_configured_rows(config_response=config, data_response=data, config_key=f"{key}Config", data_key=key)
         return {"account_id": context.account_record_id, "environment": context.environment, "source": "TradeLocker",
-                "checked_at": datetime.now(timezone.utc).isoformat(), "rows": [public_row(r, symbols, view) for r in rows][-200:]}
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "rate_limits":(config.get("d") or {}).get("rateLimits"),
+                "quote_cooldown_until":client.request_limiter.state("quotes:"+context.connection_ref+":"+context.account_record_id).get("cooldown_until"), "rows": [public_row(r, symbols, view) for r in rows][-200:]}
     except AccountResolutionError:
         raise HTTPException(404, "Account unavailable.") from None
     except (TradeLockerError, TradeLockerMappingError):

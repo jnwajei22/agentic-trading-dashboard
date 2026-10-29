@@ -443,7 +443,17 @@ class TradeLockerClient:
             return await read()
         scope="quotes:"+self.cache_connection_id+":"+self.cache_account_record_id
         for attempt in range(2):
-            lease=await self.request_limiter.acquire(scope)
+            state=self.request_limiter.state(scope)
+            remaining=max(0.0,float(state.get("cooldown_epoch") or 0)-time.time())
+            if remaining > settings.tradelocker_rate_limit_max_backoff_seconds:
+                raise TradeLockerError("get_quote", "Broker price requests are cooling down.",code="rate_limited",status_code=429,
+                    details={"retry_after_seconds":remaining})
+            try:
+                async with asyncio.timeout(settings.tradelocker_rate_limit_max_backoff_seconds+1):
+                    lease=await self.request_limiter.acquire(scope)
+            except TimeoutError:
+                raise TradeLockerError("get_quote", "Broker price queue is busy.",code="rate_limited",status_code=429,
+                    details={"retry_after_seconds":settings.tradelocker_rate_limit_max_backoff_seconds}) from None
             try:
                 result=await read()
                 self.request_limiter.set_cooldown(scope,1.0)
