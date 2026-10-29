@@ -168,3 +168,60 @@ def test_two_connections_cannot_claim_one_approval_twice():
         except AgentStateError:return 'rejected'
     with ThreadPoolExecutor(max_workers=2) as pool:outcomes=list(pool.map(claim,range(2)))
     assert sorted(outcomes)==['claimed','rejected']
+
+
+def test_named_execution_records_round_trip_through_runtime_role():
+    import json
+    repo=ExecutionRepository();owner=settings.workspace_owner_sub;token=uuid4().hex
+    now=datetime.now(timezone.utc);stamp=now.isoformat();expiry=(now+timedelta(minutes=5)).isoformat()
+    snapshot_id='snap-'+token;preview_id='preview-'+token;run_id='run-'+token
+    routing={'user_sub':owner,'connection_id':'connection','account_id':'broker-account','acc_num':'1'}
+    repo.insert_snapshot({'id':snapshot_id,**routing,'environment':'demo','strategy_name':'strategy','strategy_version':'1',
+        'normalized_snapshot_json':json.dumps({'label':"O'Reilly :literal ? 50%"}),'retrieved_at':stamp,'expires_at':expiry,'created_at':stamp})
+    assert repo.get_snapshot(snapshot_id)['normalized_snapshot']['label']=="O'Reilly :literal ? 50%"
+    preview={'id':preview_id,'snapshot_id':snapshot_id,**routing,'profile_ref':'profile','environment':'demo',
+        'pair':'EURUSD','instrument_id':'42','route_id':'1','side':'long','order_type':'market',
+        'entry':1.1,'stop_loss':1.09,'take_profit':1.12,'quantity':1000,'lot_size':.01,'estimated_risk':10,
+        'risk_percent':.1,'estimated_reward':20,'reward_risk':2,'broker_metadata_json':'{}',
+        'status':'approved','violations_json':'[]','expires_at':expiry,'created_at':stamp}
+    repo.insert_preview(preview)
+    assert repo.get_preview(preview_id)['lot_size']==.01
+    submission_id='submission-'+token
+    assert repo.claim_submission(submission_id,preview_id,'key-'+token,'fingerprint')[0]
+    repo.update_submission(submission_id,submission_state='verified',reconciliation_json={'verified':True},execution_id=run_id)
+    assert repo.get_submission(preview_id=preview_id)['reconciliation']['verified'] is True
+    repo.insert_run({'id':run_id,**routing,'snapshot_id':snapshot_id,'preview_id':preview_id,'strategy_name':'strategy',
+        'strategy_version':'1','decision':'submit','result_status':'unknown','result_json':{'verified':False},
+        'started_at':stamp,'completed_at':stamp,'created_at':stamp})
+    repo.update_run(run_id,result_status='verified',result_json={'verified':True})
+    assert repo.get_run(owner,run_id)['result']['verified'] is True
+    decision_id='decision-'+token
+    assert repo.claim_decision_run({'id':decision_id,'run_key':'decision-key-'+token,'user_sub':owner,'profile_ref':'profile-'+token,
+        'strategy_ref':'strategy','strategy_version':'1','decision_provider':'no_trade','trigger_reason':'test',
+        'state':'claimed','shadow_mode':True,'started_at':stamp,'created_at':stamp,'updated_at':stamp})[0]
+    repo.update_decision_run(decision_id,state='no_trade',validation_json={'would_submit':False},reason_codes_json=['test_only'])
+    assert repo.get_decision_run(owner,decision_id)['reason_codes']==['test_only']
+
+
+def test_named_demo_action_preview_and_durable_lookup():
+    repo=ExecutionRepository();owner=settings.workspace_owner_sub;token=uuid4().hex;now=datetime.now(timezone.utc)
+    preview_id='close-'+token
+    repo.insert_action_preview({'id':preview_id,'user_sub':owner,'action_type':'close_position','profile_ref':'profile',
+        'account_record_id':'account-ref','connection_ref':'connection-ref','connection_id':'connection',
+        'account_id':'broker-account','acc_num':'1','account_alias':'demo','environment':'demo','server':'Test',
+        'base_url':'https://demo.example/backend-api','demo_classification':'demo','target_id':'position-1',
+        'target_json':{'id':'position-1','qty':.01},'status':'approved',
+        'expires_at':(now+timedelta(minutes=5)).isoformat(),'created_at':now.isoformat()})
+    assert repo.get_action_preview(preview_id)['target']['qty']==.01
+    execution_id='action-'+token;key='key-'+token
+    assert repo.claim_action(execution_id,preview_id,owner,key,'close_position','position-1')[0]
+    repo.update_action_execution(execution_id,state='verified',reconciliation={'verified':True,'target_absent':True})
+    assert repo.get_action_submission(owner,preview_id,key)['reconciliation']['target_absent'] is True
+    assert repo.get_action_submission('stranger',preview_id,key) is None
+
+
+def test_named_bindings_preserve_casts_and_repeated_values():
+    with connect() as db:
+        row=db.execute("SELECT :amount::numeric + :amount::numeric AS total, ':literal ?' AS label, :flag AS enabled",
+                       {'flag':True,'amount':1.25}).fetchone()
+    assert row['total']==2.5 and row['label']==':literal ?' and row['enabled']==1

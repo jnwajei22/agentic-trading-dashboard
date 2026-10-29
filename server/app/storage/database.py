@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -69,7 +70,8 @@ def postgres_sql(sql):
     sql = re.sub(r'\browid\b', 'ctid', sql)
     # Psycopg's percent placeholders must not interpret literal LIKE wildcards.
     sql = sql.replace('%', '%%')
-    return re.sub(r"('(?:''|[^'])*'|\"(?:\"\"|[^\"])*\")|\?", lambda match: match.group(1) or '%s', sql)
+    tokens = r"('(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|--[^\n]*|/\*[\s\S]*?\*/)|\?|(?<!:):([A-Za-z_][A-Za-z0-9_]*)"
+    return re.sub(tokens, lambda match: match.group(1) or ('%(' + match.group(2) + ')s' if match.group(2) else '%s'), sql)
 
 
 class Result:
@@ -143,7 +145,10 @@ class PostgresConnection:
         sql = postgres_sql(sql)
         returning = bool(re.match(r'\s*INSERT INTO broker_connections\b', sql, re.I))
         if returning: sql += ' RETURNING id'
-        params = tuple(int(value) if isinstance(value, bool) else value for value in params)
+        if isinstance(params, Mapping):
+            params = {key: int(value) if isinstance(value, bool) else value for key, value in params.items()}
+        else:
+            params = tuple(int(value) if isinstance(value, bool) else value for value in params)
         # Savepoints preserve repository handling of duplicate claims within a transaction.
         cursor.execute('SAVEPOINT desk_statement')
         try:
