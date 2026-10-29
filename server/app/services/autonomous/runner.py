@@ -40,9 +40,11 @@ class AutonomousDecisionRunner:
     @staticmethod
     def _session(now:datetime)->set[str]:
         hour=now.hour; active=set()
+        if 0<=hour<9:active.update({"tokyo","asia"})
+        if hour>=21 or hour<6:active.add("sydney")
         if 7<=hour<16:active.add("london")
         if 12<=hour<21:active.add("new_york")
-        if 12<=hour<16:active.add("overlap")
+        if 12<=hour<16:active.update({"overlap","london_new_york_overlap"})
         return active
 
     def _blocking_reasons(self,profile:dict[str,Any],now:datetime,user_sub:str|None=None)->list[str]:

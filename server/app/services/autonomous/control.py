@@ -38,9 +38,11 @@ def strategy_default_times(profile: dict[str, Any]) -> list[str]:
     """Hourly UTC evaluations covering the profile's configured forex sessions."""
     sessions = set(profile.get("allowed_sessions") or ["london", "new_york", "overlap"])
     hours: set[int] = set()
+    if sessions.intersection({"tokyo", "asia"}): hours.update(range(0, 9))
+    if "sydney" in sessions: hours.update([21, 22, 23, 0, 1, 2, 3, 4, 5])
     if "london" in sessions: hours.update(range(7, 16))
     if "new_york" in sessions: hours.update(range(12, 21))
-    if "overlap" in sessions: hours.update(range(12, 16))
+    if sessions.intersection({"overlap", "london_new_york_overlap"}): hours.update(range(12, 16))
     if not hours: hours.update(range(7, 21))
     return [f"{hour:02d}:00" for hour in sorted(hours)]
 

@@ -147,7 +147,7 @@ class AutonomousArmRequest(BaseModel):
     decision_provider: Literal["openai","no_trade"] = "no_trade"
     model_identifier: str | None = Field(default=None,min_length=1,max_length=80)
     minimum_confidence: float = Field(default=0.70,ge=0.5,le=1.0)
-    allowed_sessions: list[Literal["london","new_york","overlap"]] = Field(default_factory=lambda:["london","new_york","overlap"],min_length=1,max_length=3)
+    allowed_sessions: list[Literal["sydney","tokyo","asia","london","new_york","overlap","london_new_york_overlap"]] = Field(default_factory=lambda:["london","new_york","overlap"],min_length=1,max_length=3)
     schedule_ref: str | None = Field(default=None,max_length=80)
     shadow_mode: bool = True
 

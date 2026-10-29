@@ -79,3 +79,14 @@ async def test_action_idempotency_key_cannot_target_another_preview(tmp_path, mo
     with pytest.raises(AutonomousExecutionError) as error:
         await service.submit_action("user",close["preview_id"],"idempotency-123")
     assert error.value.code == "idempotency_conflict" and client.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_action_late_lookup_only_reads_broker_state(tmp_path, monkeypatch):
+    service,profile,client=configured(tmp_path,monkeypatch)
+    preview=await service.review_action("user",profile,"close_position","position-1")
+    result=await service.submit_action("user",preview["preview_id"],"idempotency-123")
+    service.execution.update_action_execution(result["execution_id"],state="unknown")
+    resolved=await service.execution_result("user",result["execution_id"])
+    assert resolved["status"] == "verified" and resolved["reconciliation"]["late_read_only_check"]
+    assert client.close_calls == 1

@@ -1569,7 +1569,30 @@ class AutonomousDemoService:
 
     async def execution_result(self,user_sub:str,execution_id:str)->dict[str,Any]:
         action=self.execution.get_action_execution(user_sub,execution_id)
-        if action:return self._action_result(action)
+        if action:
+            if action["state"] == "unknown":
+                preview=self.execution.get_action_preview(action["preview_id"])
+                if preview and preview["user_sub"] == user_sub:
+                    context=await self.context(user_sub,preview["profile_ref"])
+                    if context.account_record_id != preview["account_record_id"] or context.connection_ref != preview["connection_ref"]:
+                        raise AutonomousExecutionError("preview_account_mismatch", "Action routing changed; inspect the broker directly.")
+                    client=self._client(context.connection,context)
+                    try:
+                        config=await client.get_config()
+                        is_cancel=preview["action_type"] == "cancel_order"
+                        payload=await (client.get_orders() if is_cancel else client.get_open_positions())
+                        rows=map_configured_rows(config_response=config,data_response=payload,
+                            config_key="ordersConfig" if is_cancel else "positionsConfig", data_key="orders" if is_cancel else "positions")
+                        aliases=("orderId","id") if is_cancel else ("positionId","id")
+                        absent=not any(str(_find_value(row,aliases)) == preview["target_id"] for row in rows)
+                        if absent:
+                            self.execution.update_action_execution(execution_id,state="verified",
+                                reconciliation={"target_absent":True,"verified":True,"target_id":preview["target_id"],"late_read_only_check":True})
+                            action=self.execution.get_action_execution(user_sub,execution_id)
+                    except (TradeLockerError,TradeLockerMappingError):
+                        pass  # Remain unknown; a failed read never authorizes another broker write.
+                    finally: await client.aclose()
+            return self._action_result(action)
         run=self.execution.get_run(user_sub,execution_id)
         if not run:raise AutonomousExecutionError("execution_not_found","No owned demo execution was found.",status="not_found")
         if run["result_status"] == "unknown" and run.get("preview_id"):

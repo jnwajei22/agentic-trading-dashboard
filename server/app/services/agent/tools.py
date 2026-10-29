@@ -226,3 +226,26 @@ def pause_schedule(schedule_id: str):
     return AutonomousScheduleService().set_enabled(get_current_user_sub(),schedule_id,False)
 
 TOOLS['pause_schedule']=make_tool('pause_schedule',pause_schedule,'autonomous')
+
+
+async def get_workspace_news(category: str = "forex", limit: int = 12):
+    """Read the dashboard's current sourced news, including free official publisher fallbacks. Coverage is limited and cannot certify a trading news blackout."""
+    if not 1 <= limit <= 50: raise ValueError("limit must be between 1 and 50")
+    service=MarketWorkspaceService()
+    try: return await service.news(category, limit)
+    finally: await service.aclose()
+
+
+async def get_workspace_calendar(start_date: str, end_date: str, limit: int = 50):
+    """Read the dashboard's official release calendar. Missing forecasts/impact ratings are unavailable; this is not a complete news-blackout feed."""
+    from datetime import date
+    start=date.fromisoformat(start_date); end=date.fromisoformat(end_date)
+    if end < start or (end-start).days > 93 or not 1 <= limit <= 100:
+        raise ValueError("Use a range of up to 93 days and a limit of 1 to 100")
+    service=MarketWorkspaceService()
+    try: return await service.calendar(start, end, limit)
+    finally: await service.aclose()
+
+
+TOOLS['get_workspace_news']=make_tool('get_workspace_news',get_workspace_news,'read')
+TOOLS['get_workspace_calendar']=make_tool('get_workspace_calendar',get_workspace_calendar,'read')

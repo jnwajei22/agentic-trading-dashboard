@@ -1,7 +1,7 @@
 import type { FailureCategory } from "./backend-runtime"
 
 export type BackendPayload = Record<string, unknown>
-const safeNestedKeys = new Set(["detail", "error", "message", "code", "fields", "request_id", "retryable", "loc", "msg", "type", "ctx"])
+const safeNestedKeys = new Set(["detail", "error", "message", "code", "fields", "request_id", "retryable", "loc", "msg", "type", "ctx", "blocking_reasons"])
 
 export class AfdBackendError extends Error {
   constructor(
@@ -16,7 +16,7 @@ export class AfdBackendError extends Error {
 export function safeErrorPayload(value: unknown): BackendPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   const source = value as BackendPayload
-  const allowed = ["detail", "error", "message", "code", "fields", "request_id", "retryable"]
+  const allowed = ["detail", "error", "message", "code", "fields", "request_id", "retryable", "blocking_reasons"]
   return Object.fromEntries(allowed.filter((key) => key in source).map((key) => [key, sanitizeNested(source[key])]))
 }
 
@@ -30,5 +30,7 @@ export function backendMessage(payload: BackendPayload) {
   const detail = payload.detail
   const source = detail && typeof detail === "object" && !Array.isArray(detail) ? detail as BackendPayload : payload
   const message = source.message ?? source.error ?? (typeof detail === "string" ? detail : undefined)
-  return typeof message === "string" && message.trim() ? message : "Backend request failed."
+  const base = typeof message === "string" && message.trim() ? message : "Backend request failed."
+  const reasons = Array.isArray(source.blocking_reasons) ? source.blocking_reasons.filter((item): item is string => typeof item === "string").slice(0, 8) : []
+  return reasons.length ? `${base} ${reasons.map(reason => reason.replaceAll("_", " ")).join("; ")}.` : base
 }

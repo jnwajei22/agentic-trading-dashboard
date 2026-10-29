@@ -1,0 +1,29 @@
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/worker/Dockerfile
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+      STORAGE_BACKEND: postgres
+      WORKSPACE_OWNER_SUB: shared-workspace
+      LIVE_TRADING_ENABLED: "false"
+      AUTONOMOUS_SCHEDULER_EMBEDDED: "false"
+    command: []
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

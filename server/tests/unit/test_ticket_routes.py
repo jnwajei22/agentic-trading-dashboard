@@ -65,3 +65,16 @@ async def test_preview_uses_fresh_snapshot_and_exact_requested_quantity(monkeypa
     assert seen["proposal"].entry == 1.1002
     assert seen["proposal"].stop_loss == 1.0982
     assert seen["proposal"].take_profit == 1.1042
+
+
+def test_asian_sessions_are_recognized_without_changing_london_or_new_york():
+    from datetime import datetime, timezone
+    assert "tokyo" in trading.AutonomousDecisionRunner._session(datetime(2026,10,29,6,tzinfo=timezone.utc))
+    assert "london" not in trading.AutonomousDecisionRunner._session(datetime(2026,10,29,6,tzinfo=timezone.utc))
+    assert "sydney" in trading.AutonomousDecisionRunner._session(datetime(2026,10,29,22,tzinfo=timezone.utc))
+
+
+def test_explicit_session_restriction_is_enforced(monkeypatch):
+    setup(monkeypatch, profile_v2={"forex":{"sessions":["tokyo"]}})
+    monkeypatch.setattr(trading.AutonomousDecisionRunner, "_session", staticmethod(lambda _: {"london"}))
+    with pytest.raises(HTTPException): trading.ticket_profile("owner", "profile", "account-a")

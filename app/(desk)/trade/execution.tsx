@@ -93,7 +93,11 @@ export function BrokerActivity({ account, view, profile, demo, revision }: { acc
   const [result, setResult] = useState<Outcome | null>(null)
   const [actionKey, setActionKey] = useState("")
   const lock = useRef(false)
-  useEffect(() => { setAction(null); setResult(null); setActivity(null) }, [account, view])
+  const actionStorage = `afd-action-pending:${account}:${view}`
+  useEffect(() => {
+    setAction(null); setResult(null); setActivity(null)
+    try { const raw=sessionStorage.getItem(actionStorage); if(raw){const saved=JSON.parse(raw); if(saved.action?.preview_id && typeof saved.key === "string"){setAction(saved.action);setActionKey(saved.key);setResult(saved.result??null)}} } catch {sessionStorage.removeItem(actionStorage)}
+  }, [account, view, actionStorage])
   useEffect(() => {
     if (!account) return
     const controller = new AbortController(); let stopped = false; let timer: ReturnType<typeof setTimeout>
@@ -116,16 +120,24 @@ export function BrokerActivity({ account, view, profile, demo, revision }: { acc
     if (!action || lock.current) return
     lock.current = true; setBusy(true); setError("")
     try {
-      const data = await browserAfdFetch<Outcome>("trading/action-submissions", { method: "POST", body: JSON.stringify({ preview_id: action.preview_id, idempotency_key: actionKey, confirmed: true }) })
+      sessionStorage.setItem(actionStorage, JSON.stringify({action,key:actionKey,result}))
+      const data = result?.execution_id
+        ? await browserAfdFetch<Outcome>(`trading/executions/${encodeURIComponent(result.execution_id)}`)
+        : await browserAfdFetch<Outcome>("trading/action-submissions", { method: "POST", body: JSON.stringify({ preview_id: action.preview_id, idempotency_key: actionKey, confirmed: true }) })
       setResult(data)
-      if (["verified", "rejected"].includes(data.status)) { setAction(null); setRefresh(n => n + 1) }
-    } catch (cause) { setError(`${message(cause)} Refresh broker activity before taking another action.`) }
+      if (["verified", "rejected"].includes(data.status)) { setAction(null); sessionStorage.removeItem(actionStorage); setRefresh(n => n + 1) }
+      else sessionStorage.setItem(actionStorage, JSON.stringify({action,key:actionKey,result:data}))
+    } catch (cause) {
+      if (cause instanceof BrowserAfdError && [404,409,422].includes(cause.status) && !result?.execution_id) {setAction(null);sessionStorage.removeItem(actionStorage);setResult({status:"rejected"})}
+      else {const unknown={status:"unknown",manual_review_required:true};setResult(unknown);sessionStorage.setItem(actionStorage,JSON.stringify({action,key:actionKey,result:unknown}))}
+      setError(`${message(cause)} Refresh broker activity before taking another action.`)
+    }
     finally { lock.current = false; setBusy(false) }
   }
   return <Card className="mt-5"><CardHeader className="flex flex-row items-center justify-between gap-3"><CardTitle>{view === "positions" ? "Open positions" : view === "pending" ? "Pending orders" : "Order history"}</CardTitle><Button variant="ghost" onClick={() => setRefresh(n => n + 1)}>Refresh</Button></CardHeader><CardContent className="space-y-5">
     {error && <p role="alert" className="text-sm text-amber-600">{error}{activity ? " Previously loaded rows may be outdated." : ""}</p>}
     {result && <p role="status" className="text-sm">{label(result.status)}{result.manual_review_required ? ". Check the broker before repeating this action." : ""}</p>}
-    {action && <div className="space-y-3 rounded-2xl bg-muted/50 p-5"><p className="text-sm font-medium">{action.action === "close_position" ? "Close this entire demo position at market?" : "Cancel this demo order?"}</p><p className="text-xs text-muted-foreground">Broker target {String(action.target.positionId ?? action.target.orderId ?? action.target.id ?? "")} · This changes the demo account.</p><div className="flex flex-wrap gap-3"><Button disabled={busy || Boolean(result?.manual_review_required)} onClick={() => void confirm()}>{busy ? "Confirming…" : "Confirm action"}</Button><Button disabled={busy} variant="ghost" onClick={() => setAction(null)}>Dismiss</Button></div></div>}
+    {action && <div className="space-y-3 rounded-2xl bg-muted/50 p-5"><p className="text-sm font-medium">{action.action === "close_position" ? "Close this entire demo position at market?" : "Cancel this demo order?"}</p><p className="text-xs text-muted-foreground">Broker target {String(action.target.positionId ?? action.target.orderId ?? action.target.id ?? "")} · This changes the demo account.</p><div className="flex flex-wrap gap-3"><Button disabled={busy} onClick={() => void confirm()}>{busy ? "Checking…" : result?.manual_review_required ? "Check action status" : "Confirm action"}</Button><Button disabled={busy || Boolean(result?.manual_review_required)} variant="ghost" onClick={() => setAction(null)}>Dismiss</Button></div></div>}
     {!account ? <p className="text-sm text-muted-foreground">Select an account to view broker activity.</p> : !activity ? <p className="text-sm text-muted-foreground">{error ? "Broker activity unavailable." : "Loading broker activity…"}</p> : activity.rows.length === 0 ? <p className="py-8 text-sm text-muted-foreground">No {view === "positions" ? "open positions" : view === "pending" ? "pending orders" : "order history"} reported by this broker account.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-xs text-muted-foreground"><tr>{["Market", "Side / type", "Lots", "Entry", "Stop / target", "P&L / status", ""].map((name, i) => <th key={i} className="px-3 pb-4 font-normal">{name}</th>)}</tr></thead><tbody>{activity.rows.map((row, i) => <tr key={`${row.id}-${i}`} className="border-t border-border/40"><td className="px-3 py-5 font-medium">{row.symbol}<span className="mt-1 block text-[10px] text-muted-foreground">#{row.id}</span></td><td className="px-3 py-5">{row.side ?? "—"}<span className="block text-xs text-muted-foreground">{row.type}</span></td><td className="px-3 py-5">{row.quantity ?? "—"}</td><td className="px-3 py-5">{row.entry ?? "—"}</td><td className="px-3 py-5">{row.stop_loss ?? "—"} / {row.take_profit ?? "—"}</td><td className="px-3 py-5">{row.pnl ?? row.status ?? "—"}</td><td className="px-3 py-5">{view !== "history" && demo && profile && <Button size="sm" variant="outline" disabled={busy || Boolean(action)} onClick={() => void prepare(row)}>{view === "positions" ? "Close" : "Cancel"}</Button>}</td></tr>)}</tbody></table></div>}
     {activity && <p className="text-xs text-muted-foreground">TradeLocker · Updated {new Date(activity.checked_at).toLocaleTimeString()} · Refreshes every 15 seconds while visible.</p>}
   </CardContent></Card>

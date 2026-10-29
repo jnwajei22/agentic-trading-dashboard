@@ -604,7 +604,7 @@ class BrokerRepository:
         if not 0.5 <= float(minimum_confidence) <= 1.0:
             raise BrokerStorageError("Minimum confidence must be between 0.5 and 1.0.")
         sessions=allowed_sessions or ["london","new_york","overlap"]
-        if not sessions or any(item not in {"london","new_york","overlap"} for item in sessions):
+        if not sessions or any(item not in {"sydney","tokyo","asia","london","new_york","overlap","london_new_york_overlap"} for item in sessions):
             raise BrokerStorageError("The autonomous session allowlist is invalid.")
         try:
             until=datetime.fromisoformat(armed_until.replace("Z","+00:00"))
