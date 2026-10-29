@@ -239,3 +239,56 @@ def test_chat_history_titles_use_first_user_message_and_preserve_ownership(tmp_p
     assert len(history[long]['title'])<=80 and history[long]['title'].endswith('…')
     assert history[empty]['title']=='New chat'
     assert other not in history and all('first_message' not in item for item in history.values())
+
+
+@pytest.mark.asyncio
+async def test_provider_retries_overload_only_before_any_streamed_output(monkeypatch):
+    import httpx
+    import openai
+    monkeypatch.setattr(settings,'openai_api_key','test-key')
+    monkeypatch.setattr(settings,'agent_model','test-model')
+    attempts=[]
+    class Stream:
+        async def __aenter__(self):
+            attempts.append(1)
+            if len(attempts)==1:
+                raise openai.APIError('busy',request=httpx.Request('POST','https://api.openai.com/v1/responses'),body={'code':'server_is_overloaded'})
+            return self
+        async def __aexit__(self,*_): pass
+        def __aiter__(self): return self
+        async def __anext__(self): raise StopAsyncIteration
+        async def get_final_response(self): return SimpleNamespace(status='completed',output=[])
+    class Client:
+        def __init__(self,**_): self.responses=SimpleNamespace(stream=lambda **_:Stream())
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): pass
+    monkeypatch.setattr(openai,'AsyncOpenAI',Client)
+    monkeypatch.setattr(orchestration.asyncio,'sleep',AsyncMock())
+    result=[event async for event in orchestration.ResponsesProvider().stream([],[])]
+    assert len(attempts)==2 and result==[{'type':'response','items':[]}]
+
+
+@pytest.mark.asyncio
+async def test_provider_does_not_replay_a_partially_streamed_response(monkeypatch):
+    import httpx
+    import openai
+    monkeypatch.setattr(settings,'openai_api_key','test-key')
+    monkeypatch.setattr(settings,'agent_model','test-model')
+    attempts=[]
+    class Stream:
+        def __init__(self): self.sent=False
+        async def __aenter__(self): attempts.append(1); return self
+        async def __aexit__(self,*_): pass
+        def __aiter__(self): return self
+        async def __anext__(self):
+            if not self.sent: self.sent=True; return SimpleNamespace(type='response.output_text.delta',delta='hello')
+            raise openai.APIError('busy',request=httpx.Request('POST','https://api.openai.com/v1/responses'),body={'code':'server_is_overloaded'})
+    class Client:
+        def __init__(self,**_): self.responses=SimpleNamespace(stream=lambda **_:Stream())
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): pass
+    monkeypatch.setattr(openai,'AsyncOpenAI',Client)
+    seen=[]
+    with pytest.raises(openai.APIError):
+        async for event in orchestration.ResponsesProvider().stream([],[]): seen.append(event)
+    assert len(attempts)==1 and seen==[{'type':'delta','text':'hello'}]

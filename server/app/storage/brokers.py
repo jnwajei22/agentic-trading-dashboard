@@ -593,7 +593,7 @@ class BrokerRepository:
             raise BrokerStorageError("Stored broker credentials cannot be decrypted.") from exc
         return {"base_url": row["base_url"], "username": row["username"], "password": password,
             "server": row["server"], "account_id": str(row["broker_account_id"]), "account_number": str(row["acc_num"]),
-            "account_alias": row["account_alias"], "environment": row["environment"], "account_ref": row["public_id"]}
+            "account_alias": row["account_alias"], "environment": row["environment"], "account_ref": row["public_id"], "connection_ref":row["connection_ref"]}
 
     def arm_autonomous_profile(self, auth0_sub: str, profile_ref: str, *, armed_until: str,
                                decision_provider: str="no_trade", model_identifier: str|None=None,

@@ -29,6 +29,7 @@ from app.storage.execution import ExecutionRepository
 from app.storage.user_experience import UserExperienceRepository
 from app.storage.runtime_settings import RuntimeSettingsRepository
 from app.services.tradelocker.config_cache import tradelocker_config_cache
+from app.services.tradelocker.catalog_cache import instrument_catalog_cache
 from app.models.execution_profile_v2 import CapitalAllocationPatch, ExecutionProfileV2
 from app.services.trading_policy import MARKET_GROUPS, normalize_instrument, resolve_universe
 from app.services.market_workspace import MarketWorkspaceService
@@ -243,8 +244,7 @@ async def _account_instruments(user_sub: str, account_alias: str) -> tuple[dict[
     context=repository().account_connection_context(user_sub,account_alias)
     if context is None: raise HTTPException(status_code=404,detail="Account not found.")
     try:
-        async with TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
-            server=context["server"],account_id=context["account_id"],account_number=context["account_number"]) as client:
+        async with _chart_client(context,user_sub) as client:
             payload=await client.get_symbols()
     except TradeLockerError as exc:
         raise HTTPException(status_code=502,detail={"error":exc.code,"message":"The account instrument catalog is unavailable."}) from None
@@ -444,8 +444,7 @@ async def _execution_market_context(user_sub:str,account_alias:str,canonical_id:
     if not match:return None,tradability
     symbol=str(match.get("broker_symbol") or match.get("symbol") or canonical.symbol)
     try:
-        async with TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
-            server=context["server"],account_id=context["account_id"],account_number=context["account_number"]) as client:
+        async with _chart_client(context,user_sub) as client:
             raw=await client.get_quote(symbol)
         bid=_quote_number(raw,{"bid","bidprice","bp"});ask=_quote_number(raw,{"ask","askprice","ap"})
         price=_quote_number(raw,{"price","last","lastprice","mid","close"})
@@ -468,8 +467,7 @@ async def trading_order_calculations(payload:OrderCalculationRequest,claims:dict
     if canonical.asset_class!="forex":raise HTTPException(status_code=409,detail="Order calculations are currently supported for provider-identified forex instruments.")
     requested=canonical.symbol.replace("/","").casefold()
     try:
-        async with TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
-            server=context["server"],account_id=context["account_id"],account_number=context["account_number"]) as client:
+        async with _chart_client(context,claims["sub"]) as client:
             symbols=await client.get_symbols();rows=TradeLockerClient._instrument_rows(symbols)
             raw=next((row for row in rows if str(row.get("symbol") or row.get("name") or "").replace("/","").replace("_","").casefold()==requested),None)
             if raw is None:raise HTTPException(status_code=409,detail="The selected account does not expose this instrument.")
@@ -536,7 +534,7 @@ async def broker_market_chart(instrument:str,account_alias:str,
 def _chart_client(context:dict, owner:str)->TradeLockerClient:
     return TradeLockerClient(base_url=context["base_url"],username=context["username"],password=context["password"],
         server=context["server"],account_id=context["account_id"],account_number=context["account_number"],
-        cache_user_id=owner,cache_account_record_id=context.get("account_ref"))
+        cache_user_id=owner,cache_connection_id=context.get("connection_ref"),cache_account_record_id=context.get("account_ref"))
 
 
 async def _broker_chart_snapshot(client:TradeLockerClient,symbol:str,canonical_id:str,timeframe:str,history:bool)->dict:
@@ -753,6 +751,7 @@ async def save_credentials(
     )
     repo.sync_accounts(claims["sub"], connection.connection_ref, discovered)
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return TradeLockerOnboardingStatus(
         status=TradeLockerConnectionStatus.CONNECTED_NO_ACCOUNT,
         connected=True,
@@ -829,6 +828,7 @@ async def select_account(
             connected=False,
         ).model_dump(mode="json")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     connection = repository().get_connection(claims["sub"])
     return TradeLockerOnboardingStatus(
         status=TradeLockerConnectionStatus.READY,
@@ -846,6 +846,7 @@ async def select_account(
 async def delete_broker(claims: dict = Depends(current_claims)) -> dict:
     repository().delete_connection(claims["sub"])
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return {"status": "deleted", "provider": "tradelocker"}
 
 
@@ -877,6 +878,7 @@ async def default_account(account_id: str, claims: dict = Depends(current_claims
     if not repository().set_default_account(claims["sub"], account_id):
         raise HTTPException(status_code=404, detail="Account not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return {"status": "updated", "account_id": account_id}
 
 
@@ -885,6 +887,7 @@ async def disable_account(account_id: str, claims: dict = Depends(current_claims
     if not repository().set_account_enabled(claims["sub"], account_id, False):
         raise HTTPException(status_code=404, detail="Account not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return {"status": "disabled", "account_id": account_id}
 
 
@@ -893,6 +896,7 @@ async def enable_account(account_id:str,claims:dict=Depends(current_claims))->di
     if not repository().set_account_enabled(claims["sub"],account_id,True):
         raise HTTPException(status_code=404,detail="Account not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return {"status":"enabled","account_id":account_id}
 
 
@@ -901,6 +905,7 @@ async def disable_connection(connection_id: str, claims: dict = Depends(current_
     if not repository().disable_connection(claims["sub"], connection_id):
         raise HTTPException(status_code=404, detail="Connection not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return {"status": "disabled", "connection_id": connection_id}
 
 
@@ -910,6 +915,7 @@ async def remove_connection(connection_id:str,claims:dict=Depends(current_claims
     except BrokerStorageError as exc:raise HTTPException(status_code=409,detail=str(exc)) from None
     if not removed:raise HTTPException(status_code=404,detail="Trading connection not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return {"status":"removed","connection_id":connection_id}
 
 
@@ -933,6 +939,7 @@ async def patch_execution_profile_v2(profile_id:str,payload:ExecutionProfileV2Pa
         raise HTTPException(status_code=422,detail={"error":"profile_validation_failed","fields":exc.errors(include_url=False)}) from None
     if not profile:raise HTTPException(status_code=404,detail="Profile not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     return _profile_contract(profile)
 
 
@@ -1015,6 +1022,7 @@ async def update_execution_profile(profile_id: str, payload: ExecutionProfileUpd
         raise HTTPException(status_code=409, detail=str(exc)) from None
     if not changed: raise HTTPException(status_code=404, detail="Profile not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
+    instrument_catalog_cache.invalidate_user(claims["sub"])
     profile=next(item for item in repository().list_profiles(claims["sub"]) if item["public_id"]==profile_id)
     return {"status":"updated","profile_id":profile_id,"profile":_profile_with_provider_readiness(profile),
         "warnings":[{"code":"legacy_profile_update_deprecated","message":"Use PATCH with the Execution Profile V2 contract."}]}

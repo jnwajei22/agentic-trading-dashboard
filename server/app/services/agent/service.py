@@ -29,18 +29,30 @@ def response_input_item(item):
 
 class ResponsesProvider:
     async def stream(self, items, schemas):
-        from openai import AsyncOpenAI
+        from openai import AsyncOpenAI, APIError
         if not settings.openai_api_key or not settings.agent_model:
             raise RuntimeError('assistant_not_configured')
         async with AsyncOpenAI(api_key=settings.openai_api_key,timeout=45,max_retries=0) as client:
-            async with client.responses.stream(model=settings.agent_model,instructions=INSTRUCTIONS,
-                input=items,tools=schemas,include=['reasoning.encrypted_content'],parallel_tool_calls=False,max_output_tokens=4000,store=False) as stream:
-                async for event in stream:
-                    if event.type=='response.output_text.delta':yield {'type':'delta','text':event.delta}
-                    elif event.type=='response.refusal.delta':yield {'type':'delta','text':event.delta}
-                response=await stream.get_final_response()
-                if response.status!='completed':raise RuntimeError('incomplete_response')
-                yield {'type':'response','items':[response_input_item(item) for item in response.output]}
+            for attempt in range(2):
+                emitted=False
+                try:
+                    async with client.responses.stream(model=settings.agent_model,instructions=INSTRUCTIONS,
+                        input=items,tools=schemas,include=['reasoning.encrypted_content'],parallel_tool_calls=False,max_output_tokens=4000,store=False) as stream:
+                        async for event in stream:
+                            if event.type in {'response.output_text.delta','response.refusal.delta'}:
+                                emitted=True
+                                yield {'type':'delta','text':event.delta}
+                        response=await stream.get_final_response()
+                        if response.status!='completed':raise RuntimeError('incomplete_response')
+                        emitted=True
+                        yield {'type':'response','items':[response_input_item(item) for item in response.output]}
+                        return
+                except APIError as exc:
+                    transient=getattr(exc,'code',None)=='server_is_overloaded' or getattr(exc,'status_code',None) in {429,500,502,503,504}
+                    if attempt == 0 and not emitted and transient:
+                        await asyncio.sleep(.75)
+                        continue
+                    raise
 
 class AgentService:
     def __init__(self,repo=None,provider=None):
@@ -168,5 +180,8 @@ class AgentService:
                 getattr(exc,'param',None),str(exc) if type(exc) is RuntimeError and str(exc) in {
                     'assistant_not_configured','incomplete_response','tool_budget_exceeded'} else None)
             self.repo.add(key,'assistant',{'text':''.join(text),'interrupted':True})
-            yield {'type':'error','code':'assistant_unavailable','message':'The assistant could not finish. Check configuration or try again. Trading results must be checked before retrying an action.'}
+            code=getattr(exc,'code',None)
+            busy=code=='server_is_overloaded' or getattr(exc,'status_code',None) in {429,503}
+            yield {'type':'error','code':'model_busy' if busy else 'assistant_unavailable',
+                'message':'The AI provider is busy. Please retry shortly. Check Activity before repeating any trading action.' if busy else 'The assistant could not finish. Check configuration or try again. Trading results must be checked before retrying an action.'}
         finally:self.repo.release(key)

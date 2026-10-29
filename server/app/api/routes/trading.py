@@ -169,7 +169,8 @@ async def account_activity(account_id: str, view: Literal["positions", "pending"
     try:
         context = BrokerAccountResolver().resolve(claims["sub"], account_ref=account_id)
         async with TradeLockerClient(base_url=context.base_url, username=context.username, password=context.password,
-                server=context.server, account_id=context.account_id, account_number=context.account_number) as client:
+                server=context.server, account_id=context.account_id, account_number=context.account_number,
+                cache_user_id=claims["sub"],cache_connection_id=context.connection_ref,cache_account_record_id=context.account_record_id) as client:
             config = await client.get_config()
             catalog = await client.get_symbols()
             symbols = {str(row.get("tradableInstrumentId") or row.get("id")): row.get("name") or row.get("symbol") for row in client._instrument_rows(catalog)}

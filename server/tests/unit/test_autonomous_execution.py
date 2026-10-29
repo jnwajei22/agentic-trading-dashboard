@@ -888,3 +888,12 @@ async def test_revoked_authorization_never_dispatches_and_consumes_claim(tmp_pat
     assert error.value.code == "authorization_revoked"
     assert client.place_order_calls == 0
     assert repository.get_submission(preview_id=preview_id)["submission_state"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_shadow_snapshot_includes_full_history_without_enabling_execution(tmp_path, monkeypatch):
+    service,profile,calls,_=snapshot_service(tmp_path,monkeypatch)
+    service.brokers.update_profile("user",profile,allowed_instruments=["EURUSD"])
+    snapshot=await service.snapshot("user",profile,autonomous=False,include_history=True)
+    assert all(snapshot["market"]["pairs"]["EURUSD"]["timeframes"][frame]["status"]=="ok" for frame in ("1d","4h","1h","15m"))
+    assert service.execution.get_autonomous_controls("user")["demo_autonomous_enabled"] is False

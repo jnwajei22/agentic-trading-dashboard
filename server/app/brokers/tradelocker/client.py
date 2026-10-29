@@ -10,6 +10,7 @@ import httpx
 import jwt
 
 from app.config.settings import settings
+from app.services.tradelocker.catalog_cache import instrument_catalog_cache
 
 from app.services.market_data.history import (
     MAX_CANDLES,
@@ -332,11 +333,14 @@ class TradeLockerClient:
         )
 
     async def get_symbols(self) -> Any:
-        return await self._optional_get(
-            self._account_path("instruments"),
-            operation="get_symbols",
-            headers=self._account_headers(),
-        )
+        async def load():
+            return await self._optional_get(self._account_path("instruments"),
+                operation="get_symbols", headers=self._account_headers())
+        if not (self.cache_user_id and self.cache_connection_id and self.cache_account_record_id):
+            return await load()
+        key=(self.cache_user_id,self.cache_connection_id,self.cache_account_record_id,
+             self.base_url,self.server,self.account_id,self.account_number)
+        return await instrument_catalog_cache.get(key,load)
 
     @staticmethod
     def _instrument_rows(payload: Any) -> list[dict[str, Any]]:

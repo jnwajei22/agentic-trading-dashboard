@@ -169,7 +169,10 @@ class AutonomousDecisionRunner:
                 if not market["open"]:
                     return self._finish(run_id,"market_closed",["no_selected_market_open"],validation_json=market)
             self.execution.update_decision_run(run_id,state="snapshotting")
-            snapshot=await self.demo.snapshot(user_sub,profile_ref,autonomous=not dry_run)
+            if dry_run and isinstance(self.demo,AutonomousDemoService):
+                snapshot=await self.demo.snapshot(user_sub,profile_ref,autonomous=False,include_history=True)
+            else:
+                snapshot=await self.demo.snapshot(user_sub,profile_ref,autonomous=not dry_run)
             if self._loss_cooldown_active(snapshot,int(profile.get("cooldown_minutes_after_loss") or 60),utcnow()):
                 return self._finish(run_id,"blocked",["loss_cooldown_active"])
             context,digest=build_decision_context(snapshot,profile)

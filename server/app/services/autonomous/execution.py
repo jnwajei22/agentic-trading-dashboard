@@ -548,7 +548,7 @@ class AutonomousDemoService:
             await fred.aclose()
         return providers, blackouts, context
 
-    async def snapshot(self, user_sub: str, profile_ref: str, symbol: str | None = None, *, autonomous: bool=False) -> dict[str, Any]:
+    async def snapshot(self, user_sub: str, profile_ref: str, symbol: str | None = None, *, autonomous: bool=False, include_history: bool=False) -> dict[str, Any]:
         context = await self.context(user_sub, profile_ref, allow_autonomous=autonomous)
         if autonomous:
             controls=self.execution.get_autonomous_controls(user_sub)
@@ -632,7 +632,7 @@ class AutonomousDemoService:
                 timeframe_results: dict[str, dict[str, Any]] = {}
                 timeframe_candles: dict[str, list[dict[str, Any]]] = {}
                 timeframe_failures: list[str] = []
-                if autonomous:
+                if autonomous or include_history:
                     for timeframe, count in (("1d", 190), ("4h", 250), ("1h", 200), ("15m", 200)):
                         try:
                             series = await client.get_candles(

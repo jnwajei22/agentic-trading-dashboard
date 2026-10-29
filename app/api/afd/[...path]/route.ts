@@ -4,6 +4,8 @@ import { AfdBackendError } from "@/lib/afd/errors"
 import { forwardToWorkspace } from "@/lib/afd/backend"
 import { afdBackendPath, isAllowedAfdRoute } from "@/lib/afd/routes"
 
+export const maxDuration = 120
+
 type Context = { params: Promise<{ path: string[] }> }
 
 async function forwardAfdRequest(request: NextRequest, segments: string[], method: string) {
