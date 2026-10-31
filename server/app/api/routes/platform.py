@@ -500,8 +500,11 @@ async def trading_order_calculations(payload:OrderCalculationRequest,claims:dict
     except HTTPException:raise
     except TradeLockerError as exc:
         cooldown=math.ceil(float(exc.details.get("retry_after_seconds") or 0))
-        message=(f"Broker prices are cooling down. Retry in {cooldown} seconds." if exc.status_code==429 and cooldown else "Authoritative broker calculation data is unavailable.")
-        raise HTTPException(status_code=503 if exc.status_code==429 else 502,detail={"error":exc.code,"message":message,"retryable":exc.status_code==429}) from None
+        label={"get_quote":"Broker prices","get_account_state":"Broker account data"}.get(exc.operation,"Broker data")
+        message=(f"{label} requests are cooling down. Retry in {cooldown} seconds." if exc.status_code==429 and cooldown else "Authoritative broker calculation data is unavailable.")
+        logger.warning("ticket_calculation_unavailable operation=%s category=%s upstream_status=%s retry_after_seconds=%s",
+            exc.operation,exc.code,exc.status_code,cooldown)
+        raise HTTPException(status_code=503 if exc.status_code==429 else 502,detail={"error":exc.code,"message":message,"retryable":exc.status_code==429,"retry_after_seconds":cooldown}) from None
     metadata={"pip_size":_quote_number(raw,{"pipsize"}),"tick_size":normalized.get("tick_size"),
         "price_precision":_quote_number(raw,{"priceprecision","digits","decimalplaces"}),
         "contract_size":normalized.get("contract_size"),"quantity_step":normalized.get("quantity_increment"),

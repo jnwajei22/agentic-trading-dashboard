@@ -33,3 +33,9 @@ export function pendingEntryMessage(side: Side, type: OrderType, entry: number |
   if (below ? entry < current : entry > current) return null
   return `${side === "buy" ? "Buy" : "Sell"} ${type} entry must be ${below ? "below" : "above"} the current ${side === "buy" ? "Ask" : "Bid"}.`
 }
+
+export function calculationRetryDelay(payload: Record<string, unknown>) {
+  const detail = payload.detail && typeof payload.detail === "object" ? payload.detail as Record<string, unknown> : payload
+  const seconds = Number(detail.retry_after_seconds)
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(600_000, Math.max(5_000, Math.ceil(seconds * 1000))) : 5_000
+}

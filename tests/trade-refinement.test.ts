@@ -34,7 +34,7 @@ test("review is concise and meaningful values are conditional",()=>{
 })
 test("stale calculation responses are ignored and polling is cancellable",()=>{
   assert.match(source,/current===sequence\.current/);assert.match(source,/AbortController/);assert.match(source,/controller\.abort/)
-  assert.match(source,/document\.hidden/);assert.match(source,/setTimeout\(run,5000\)/)
+  assert.match(source,/document\.hidden/);assert.match(source,/setTimeout\(run,retryMs\)/)
 })
 test("preview values freeze and expiry requires a refresh",()=>{
   const live={price:1};const frozen={price:2};const preview={calculation:frozen,expires_at:new Date(Date.now()+1000).toISOString()}
@@ -56,4 +56,12 @@ test("pending orders use requested entry for protection and validate all four en
     assert.equal(pendingEntryMessage(side,type,price,quote),null)
     assert.ok(pendingEntryMessage(side,type,price===1.34?1.35:1.34,quote))
   }
+})
+
+test("broker calculation retries honor provider cooldowns with bounded delays",async()=>{
+  const {calculationRetryDelay}=await import("../app/(desk)/trade/ticket-model")
+  assert.equal(calculationRetryDelay({detail:{retry_after_seconds:8}}),8000)
+  assert.equal(calculationRetryDelay({detail:{retry_after_seconds:120}}),120000)
+  assert.equal(calculationRetryDelay({retry_after_seconds:Infinity}),5000)
+  assert.equal(calculationRetryDelay({retry_after_seconds:10000}),600000)
 })

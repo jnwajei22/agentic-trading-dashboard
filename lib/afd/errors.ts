@@ -1,7 +1,7 @@
 import type { FailureCategory } from "./backend-runtime"
 
 export type BackendPayload = Record<string, unknown>
-const safeNestedKeys = new Set(["detail", "error", "message", "code", "fields", "request_id", "retryable", "loc", "msg", "type", "ctx", "blocking_reasons"])
+const safeNestedKeys = new Set(["detail", "error", "message", "code", "fields", "request_id", "retryable", "loc", "msg", "type", "ctx", "blocking_reasons", "retry_after_seconds"])
 
 export class AfdBackendError extends Error {
   constructor(
@@ -16,7 +16,7 @@ export class AfdBackendError extends Error {
 export function safeErrorPayload(value: unknown): BackendPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   const source = value as BackendPayload
-  const allowed = ["detail", "error", "message", "code", "fields", "request_id", "retryable", "blocking_reasons"]
+  const allowed = ["detail", "error", "message", "code", "fields", "request_id", "retryable", "blocking_reasons", "retry_after_seconds"]
   return Object.fromEntries(allowed.filter((key) => key in source).map((key) => [key, sanitizeNested(source[key])]))
 }
 
