@@ -50,8 +50,9 @@ def _client_for(subject: str) -> TestClient:
     return TestClient(app)
 
 
+@pytest.mark.parametrize("positional_state",[False,True])
 @pytest.mark.parametrize("order_type,entry",[("market",None),("limit",1.34),("stop",1.35)])
-def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage,monkeypatch,order_type,entry):
+def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage,monkeypatch,order_type,entry,positional_state):
     user="auth0|calculator";connection=platform_storage.save_connection(user,base_url="https://demo.example/backend-api",
         username="user",password="password",server="HeroFX",environment="demo")
     platform_storage.sync_accounts(user,connection.connection_ref,
@@ -65,7 +66,8 @@ def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage
         async def get_symbols(self):return [{"tradableInstrumentId":"1","symbol":"GBPUSD","assetClass":"forex",
             "tickSize":.00001,"contractSize":100000,"minQty":.01,"qtyStep":.01,"marginRate":.02}]
         async def get_quote(self,symbol):return {"d":{"bp":1.3452,"ap":1.34528}}
-        async def get_account_state_payload(self):return {"d":{"balance":100000}}
+        async def get_config(self):return {"d":{"accountDetailsConfig":{"columns":[{"id":"projectedBalance"}]}}}
+        async def get_account_state_payload(self):return {"d":{"accountDetailsData":[100000]}} if positional_state else {"d":{"balance":100000}}
         async def submit_order(self,*args,**kwargs):Client.submitted=True;raise AssertionError("calculation cannot submit")
         _instrument_rows=staticmethod(lambda payload:payload)
     monkeypatch.setattr(platform,"TradeLockerClient",Client)
@@ -78,6 +80,7 @@ def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage
     result=response.json();assert result["entry_side"]==("Ask" if order_type=="market" else "Requested") and result["pip_value"]["value"]==5
     assert result["entry_price"]==(1.34528 if order_type=="market" else entry)
     assert result["stop_loss"]["distance_pips"]==40 and result["take_profit"]["reward_to_risk"]==2
+    assert result["stop_loss"]["risk_percent"]==.2
     assert Client.submitted is False and "preview_id" not in result
 
     with _client_for("auth0|other-user") as client:

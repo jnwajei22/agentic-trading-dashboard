@@ -93,7 +93,7 @@ def calculate_order(*, terms: InstrumentTerms, side: str, quantity: float, bid: 
         "contract_size": terms.contract_size,
         "pip_value": {"value": _money(pip_value), "currency": account_currency} if pip_value is not None else None,
         "stop_loss": {"price": _round(stop, terms.price_precision), "distance_pips": _measure(stop_pips),
-                      "estimated_loss": _money(loss), "risk_percent": _measure(risk_percent)} if stop is not None else None,
+                      "estimated_loss": _money(loss), "risk_percent": round(risk_percent,4) if risk_percent is not None else None} if stop is not None else None,
         "take_profit": {"price": _round(target, terms.price_precision), "distance_pips": _measure(target_pips),
                         "estimated_profit": _money(profit), "reward_to_risk": _measure(reward_risk)} if target is not None else None,
         "notional_exposure": _money(exposure), "margin_estimate": _money(margin),

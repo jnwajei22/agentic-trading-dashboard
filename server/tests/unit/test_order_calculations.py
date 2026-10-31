@@ -53,7 +53,7 @@ def test_provider_step_precision_margin_risk_and_exposure_are_normalized():
     result=calculation(quantity=.5)
     assert result["quantity"]["step"]==.01 and result["price_precision"]==5
     assert result["stop_loss"]["estimated_loss"]==264
-    assert result["stop_loss"]["risk_percent"]==pytest.approx(.26)
+    assert result["stop_loss"]["risk_percent"]==pytest.approx(.264)
     assert result["take_profit"]["estimated_profit"]==528
     assert result["notional_exposure"]==67264 and result["margin_estimate"]==1345.28
 

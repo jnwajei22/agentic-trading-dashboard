@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
+from app.brokers.tradelocker.mapping import TradeLockerMappingError, map_configured_array
 from app.brokers.tradelocker.client import TradeLockerClient, TradeLockerError
 from app.config.settings import settings
 from app.storage.brokers import BrokerRepository, BrokerStorageError
@@ -479,7 +480,16 @@ async def trading_order_calculations(payload:OrderCalculationRequest,claims:dict
             if quote_epoch and quote_epoch>10_000_000_000:quote_epoch/=1000
             quote_timestamp=datetime.fromtimestamp(quote_epoch,timezone.utc) if quote_epoch else datetime.now(timezone.utc)
             state=await client.get_account_state_payload()
-            equity=_quote_number(state,{"projectedbalance","equity","balance"})
+            equity=_quote_number(state,{"projectedbalance","equity"})
+            if equity is None:equity=_quote_number(state,{"balance"})
+            if equity is None and hasattr(client,"get_config"):
+                try:
+                    mapped=map_configured_array(config_response=await client.get_config(),data_response=state,
+                        config_key="accountDetailsConfig",data_key="accountDetailsData")
+                    equity=_quote_number(mapped,{"projectedbalance","equity"})
+                    if equity is None:equity=_quote_number(mapped,{"balance"})
+                except TradeLockerMappingError:
+                    logger.warning("ticket_calculation_account_mapping_unavailable")
             account_currency=str(owned.get("currency") or "").upper() or None
             quote_currency=str(normalized.get("quote_currency") or canonical.symbol[-3:]).upper()
             rate=1.0 if account_currency==quote_currency else None
