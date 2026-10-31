@@ -493,7 +493,15 @@ CREATE TABLE desk.workspace_events (
 CREATE INDEX workspace_events_owner_time ON desk.workspace_events(user_sub, occurred_at DESC);
 ALTER TABLE desk.workspace_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY desk_runtime_access ON desk.workspace_events TO desk_runtime USING (true) WITH CHECK (true);
-REVOKE ALL ON desk.workspace_events FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON desk.workspace_events FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN
+    REVOKE ALL ON desk.workspace_events FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN
+    REVOKE ALL ON desk.workspace_events FROM authenticated;
+  END IF;
+END $$;
 GRANT SELECT, INSERT, UPDATE, DELETE ON desk.workspace_events TO desk_runtime;
 
 COMMIT;
