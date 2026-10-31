@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react"
 import { BrowserAfdError, browserAfdFetch } from "@/lib/afd/browser-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { OrderHistory } from "./order-history"
+import type { BrokerRow } from "./activity-model"
 
 export type ApprovedOrder = {
   preview_id: string; expires_at: string; profile_ref: string; account_id: string;
@@ -65,6 +67,7 @@ export function SubmissionControls({ account, preview, busy, canReview, review, 
   if (pending || outcome) return <div className="space-y-3 border-t border-border/40 pt-5" aria-live="polite">
     <p className="text-sm font-medium">{outcome ? label(outcome.status) : "Submission awaiting confirmation"}</p>
     {outcome?.broker_order_id && <p className="text-xs text-muted-foreground">Broker order {outcome.broker_order_id}</p>}
+    {outcome?.message && <p className="text-xs leading-relaxed text-muted-foreground">{outcome.message}</p>}
     {error && <p role="alert" className="text-xs text-amber-600">{error}</p>}
     {pending ? <><p className="text-xs leading-relaxed text-muted-foreground">The broker may have received this order. Check its status; do not create a replacement order.</p><Button disabled={sending} onClick={() => void reconcile()} className="w-full rounded-full">{sending ? "Checking…" : "Check submission"}</Button></> : <Button onClick={() => { setOutcome(null); edit() }} variant="outline" className="w-full rounded-full">New order</Button>}
   </div>
@@ -81,7 +84,6 @@ export function SubmissionControls({ account, preview, busy, canReview, review, 
   </div>
 }
 
-type BrokerRow = { id: string; symbol: string; side: string | null; quantity: number | null; entry: number | null; pnl: number | null; stop_loss: number | null; take_profit: number | null; status: string | null; type: string | null }
 type Activity = { rows: BrokerRow[]; checked_at: string; account_id: string }
 type Action = { preview_id: string; expires_at: string; action: string; target: Record<string, unknown> }
 
@@ -139,7 +141,7 @@ export function BrokerActivity({ account, view, profile, demo, revision }: { acc
     {error && <p role="alert" className="text-sm text-amber-600">{error}{activity ? " Previously loaded rows may be outdated." : ""}</p>}
     {result && <p role="status" className="text-sm">{label(result.status)}{result.manual_review_required ? ". Check the broker before repeating this action." : ""}</p>}
     {action && <div className="space-y-3 rounded-2xl bg-muted/50 p-5"><p className="text-sm font-medium">{action.action === "close_position" ? "Close this entire demo position at market?" : "Cancel this demo order?"}</p><p className="text-xs text-muted-foreground">Broker target {String(action.target.positionId ?? action.target.orderId ?? action.target.id ?? "")} · This changes the demo account.</p><div className="flex flex-wrap gap-3"><Button disabled={busy} onClick={() => void confirm()}>{busy ? "Checking…" : result?.manual_review_required ? "Check action status" : "Confirm action"}</Button><Button disabled={busy || Boolean(result?.manual_review_required)} variant="ghost" onClick={() => setAction(null)}>Dismiss</Button></div></div>}
-    {!account ? <p className="text-sm text-muted-foreground">Select an account to view broker activity.</p> : !activity ? <p className="text-sm text-muted-foreground">{error ? "Broker activity unavailable." : "Loading broker activity…"}</p> : activity.rows.length === 0 ? <p className="py-8 text-sm text-muted-foreground">No {view === "positions" ? "open positions" : view === "pending" ? "pending orders" : "order history"} reported by this broker account.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-xs text-muted-foreground"><tr>{["Market", "Side / type", "Lots", "Entry", "Stop / target", "P&L / status", ""].map((name, i) => <th key={i} className="px-3 pb-4 font-normal">{name}</th>)}</tr></thead><tbody>{activity.rows.map((row, i) => <tr key={`${row.id}-${i}`} className="border-t border-border/40"><td className="px-3 py-5 font-medium">{row.symbol}<span className="mt-1 block text-[10px] text-muted-foreground">#{row.id}</span></td><td className="px-3 py-5">{row.side ?? "—"}<span className="block text-xs text-muted-foreground">{row.type}</span></td><td className="px-3 py-5">{row.quantity ?? "—"}</td><td className="px-3 py-5">{row.entry ?? "—"}</td><td className="px-3 py-5">{row.stop_loss ?? "—"} / {row.take_profit ?? "—"}</td><td className="px-3 py-5">{row.pnl ?? row.status ?? "—"}</td><td className="px-3 py-5">{view !== "history" && demo && profile && <Button size="sm" variant="outline" disabled={busy || Boolean(action)} onClick={() => void prepare(row)}>{view === "positions" ? "Close" : "Cancel"}</Button>}</td></tr>)}</tbody></table></div>}
+    {!account ? <p className="text-sm text-muted-foreground">Select an account to view broker activity.</p> : !activity ? <p className="text-sm text-muted-foreground">{error ? "Broker activity unavailable." : "Loading broker activity…"}</p> : activity.rows.length === 0 ? <p className="py-8 text-sm text-muted-foreground">No {view === "positions" ? "open positions" : view === "pending" ? "pending orders" : "order history"} reported by this broker account.</p> : view === "history" ? <OrderHistory key={account} rows={activity.rows} /> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-xs text-muted-foreground"><tr>{["Market", "Side / type", "Lots", "Entry", "Stop / target", "P&L / status", ""].map((name, i) => <th key={i} className="px-3 pb-4 font-normal">{name}</th>)}</tr></thead><tbody>{activity.rows.map((row, i) => <tr key={`${row.id}-${i}`} className="border-t border-border/40"><td className="px-3 py-5 font-medium">{row.symbol}<span className="mt-1 block text-[10px] text-muted-foreground">#{row.id}</span></td><td className="px-3 py-5">{row.side ?? "—"}<span className="block text-xs text-muted-foreground">{row.type}</span></td><td className="px-3 py-5">{row.quantity ?? "—"}</td><td className="px-3 py-5">{row.entry ?? "—"}</td><td className="px-3 py-5">{row.stop_loss ?? "—"} / {row.take_profit ?? "—"}</td><td className="px-3 py-5">{row.pnl ?? row.status ?? "—"}</td><td className="px-3 py-5">{demo && profile && <Button size="sm" variant="outline" disabled={busy || Boolean(action)} onClick={() => void prepare(row)}>{view === "positions" ? "Close" : "Cancel"}</Button>}</td></tr>)}</tbody></table></div>}
     {activity && <p className="text-xs text-muted-foreground">TradeLocker · Updated {new Date(activity.checked_at).toLocaleTimeString()} · Refreshes every 15 seconds while visible.</p>}
   </CardContent></Card>
 }
