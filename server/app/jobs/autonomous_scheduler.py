@@ -80,7 +80,7 @@ def _valid_instants(day:date,local_time:str,zone:ZoneInfo)->list[datetime]:
     for fold in (0,1):
         local=naive.replace(tzinfo=zone,fold=fold);utc=local.astimezone(timezone.utc)
         if utc.astimezone(zone).replace(tzinfo=None)==naive and utc not in results:results.append(utc)
-    return sorted(results)
+    return sorted(results)[:1] # One run per wall-clock time on a repeated DST hour.
 
 
 def next_scheduled_utc(after:datetime,timezone_name:str,local_times:list[str])->datetime:
@@ -260,6 +260,7 @@ class AutonomousSchedulerWorker:
         self.worker_id=worker_id or f"worker_{uuid4().hex[:12]}";self.schedules=schedules or ScheduleRepository()
         self.runner_factory=runner_factory or AutonomousDecisionRunner;self._stop=asyncio.Event()
         self.position_management=position_management;self.execution_mode=execution_mode
+        self.brokers=BrokerRepository(self.schedules.db_path)
 
     @staticmethod
     def _next(schedule:dict[str,Any],after:datetime)->datetime:
@@ -275,6 +276,12 @@ class AutonomousSchedulerWorker:
             if not self.schedules.mark_running(dispatch["id"],self.worker_id,settings.autonomous_scheduler_lease_seconds):
                 counts["skipped"]+=1;logger.info("autonomous_scheduler_lock_contention worker_id=%s dispatch_id=%s",self.worker_id,dispatch["id"]);continue
             try:
+                schedule=self.schedules.get_schedule(dispatch["user_sub"],dispatch["schedule_id"])
+                profile=self.brokers.get_profile(dispatch["user_sub"],dispatch["profile_ref"])
+                if schedule and profile and _recurrence(schedule)["market_aware"] and not _likely_open(profile,current):
+                    self.schedules.finish_dispatch(dispatch["id"],state="skipped",outcome="MARKET_CLOSED",run_id=None,
+                        reason_code="market_hours_closed",summary={"outcome":"MARKET_CLOSED"},safe_retry=False,retry_count=dispatch.get("retry_count",0))
+                    counts["skipped"]+=1;continue
                 result=await dispatch_autonomous_cycle(self.runner_factory(),dispatch["user_sub"],dispatch["profile_ref"],
                     dispatch["run_key"],f"scheduled:{dispatch['id']}",allow_safe_retry=True)
             except Exception:

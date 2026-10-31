@@ -397,8 +397,10 @@ class AutonomousDemoService:
                     excluded={str(value).replace("/","").upper() for value in universe.get("excluded_instrument_ids",[])}
                     selected=[item for item in catalog if item["broker_symbol"].replace("/","").upper() in wanted
                         and item["instrument_id"] not in excluded and item["broker_symbol"].replace("/","").upper() not in excluded]
-                selected=[item for item in selected if item["broker_symbol"] in ALLOWED_PAIRS and market_is_open(item,utcnow())]
-                if not selected:raise AutonomousExecutionError("no_supported_market_selected","No supported execution market is currently available in this strategy.")
+                selected=[item for item in selected if item["broker_symbol"] in ALLOWED_PAIRS]
+                if not selected:raise AutonomousExecutionError("no_supported_market_selected","No supported execution market is selected in this strategy.")
+                opened=[item for item in selected if market_is_open(item,utcnow())]
+                if opened:selected=opened
                 screening=screen_candidates(selected,maximum_screened=settings.autonomous_maximum_instruments_screened,
                     maximum_deeply_analyzed=settings.autonomous_maximum_instruments_deeply_analyzed)
                 deep=set(screening["deep_candidates"])
