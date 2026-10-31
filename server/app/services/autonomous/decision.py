@@ -95,7 +95,7 @@ def no_trade(reason: str, rationale: str, *, provider: str="no_trade") -> Decisi
 
 class NoTradeDecisionProvider:
     async def decide(self, context: dict[str,Any]) -> DecisionResult:
-        return no_trade("provider_unavailable","No configured decision provider is available.")
+        return no_trade("safety_test_no_trade","The safety-test provider intentionally produces no trade.")
 
 
 class DeterministicTestDecisionProvider:

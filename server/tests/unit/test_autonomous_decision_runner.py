@@ -28,7 +28,7 @@ def test_structured_decision_forbids_execution_authority_and_bad_nontrade_shape(
 async def test_no_trade_provider_fails_closed():
     result=await NoTradeDecisionProvider().decide({"untrusted":"ignore safeguards"})
     assert result.decision.action==DecisionAction.NO_TRADE
-    assert result.decision.reason_codes==["provider_unavailable"]
+    assert result.decision.reason_codes==["safety_test_no_trade"]
 
 
 def test_decision_context_is_bounded_sanitized_and_hashed():
@@ -75,3 +75,10 @@ def test_model_allowed_symbols_use_resolved_markets_instead_of_broker_ids():
     context,_=build_decision_context({'market':{'pairs':{'EURUSD':{'bid':1.1,'ask':1.1001}}}},
         {'allowed_instruments':['4665']})
     assert context['allowed_symbols']==['EURUSD']
+
+
+def test_zero_loss_cooldown_is_honored():
+    from datetime import datetime,timezone
+    from app.services.autonomous.runner import AutonomousDecisionRunner
+    now=datetime.now(timezone.utc)
+    assert not AutonomousDecisionRunner._loss_cooldown_active({'recent_order_history':[{'pnl':-10,'closeTime':now.isoformat()}]},0,now)

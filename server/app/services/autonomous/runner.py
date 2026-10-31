@@ -106,6 +106,7 @@ class AutonomousDecisionRunner:
 
     @classmethod
     def _loss_cooldown_active(cls,snapshot:dict[str,Any],minutes:int,now:datetime)->bool:
+        if minutes<=0:return False
         for row in reversed(snapshot.get("recent_order_history",[])):
             pnl=cls._value(row,{"pnl","netpnl","profit","realizedpnl"})
             stamp=cls._value(row,{"closetime","closedat","updatedat","timestamp","filledat"})
@@ -187,7 +188,7 @@ class AutonomousDecisionRunner:
                 snapshot=await self.demo.snapshot(user_sub,profile_ref,autonomous=False,include_history=True,analysis_only=True)
             else:
                 snapshot=await self.demo.snapshot(user_sub,profile_ref,autonomous=not dry_run)
-            if self._loss_cooldown_active(snapshot,int(profile.get("cooldown_minutes_after_loss") or 60),utcnow()):
+            if self._loss_cooldown_active(snapshot,int(60 if profile.get("cooldown_minutes_after_loss") is None else profile["cooldown_minutes_after_loss"]),utcnow()):
                 return self._finish(run_id,"blocked",["loss_cooldown_active"])
             context,digest=build_decision_context(snapshot,profile)
             self.execution.update_decision_run(run_id,state="deciding",snapshot_id=snapshot["snapshot_id"],context_hash=digest,
@@ -207,7 +208,7 @@ class AutonomousDecisionRunner:
                 self.execution.update_decision_run(run_id,validation_json={"approved":False,"reasons":[code]})
                 return self._finish(run_id,"blocked",[code])
             validation=[]
-            if decision.confidence<float(profile.get("minimum_confidence") or settings.autonomous_default_minimum_confidence):validation.append("confidence_below_threshold")
+            if decision.confidence<float(settings.autonomous_default_minimum_confidence if profile.get("minimum_confidence") is None else profile["minimum_confidence"]):validation.append("confidence_below_threshold")
             if decision.symbol not in snapshot.get("market",{}).get("pairs",{}):validation.append("pair_not_allowed")
             pair_context=context.get("market",{}).get(decision.symbol or "",{})
             if not pair_context.get("complete") or any(not item.get("complete") for item in pair_context.get("timeframes",{}).values()):validation.append("market_data_incomplete")

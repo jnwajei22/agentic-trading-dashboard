@@ -1131,7 +1131,7 @@ async def run_profile_demo_test(profile_id:str,claims:dict=Depends(current_claim
             f"demo-test:{profile_id}:{uuid.uuid4().hex[:16]}","demo_test",dry_run=True)
         record=ExecutionRepository().get_decision_run(claims["sub"],result.get("run_id")) if result.get("run_id") else None
         return {**result,"decision":(record or {}).get("decision",{}),"validation":(record or {}).get("validation",{}),
-            "dry_run":True,"submission_allowed":False,"message":"Analysis completed without submitting an order."}
+            "dry_run":True,"submission_allowed":False,"message":("The selected markets are closed. No model decision or order was requested." if result.get("outcome")=="MARKET_CLOSED" else "Analysis completed without submitting an order.")}
     except AutonomousExecutionError as exc:raise HTTPException(status_code=409,detail=exc.as_dict()) from None
 
 

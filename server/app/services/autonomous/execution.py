@@ -880,10 +880,10 @@ class AutonomousDemoService:
         policy=context.risk.get("risk_policy") or {}
         base=float(context.risk["risk_per_trade_percent"])
         if not autonomous or policy.get("mode")!="adaptive":return base
-        minimum_confidence=float(context.risk.get("minimum_confidence") or .7)
+        minimum_confidence=float(.7 if context.risk.get("minimum_confidence") is None else context.risk["minimum_confidence"])
         if confidence is None or not math.isfinite(confidence) or not minimum_confidence<=confidence<=1:
             raise AutonomousExecutionError("adaptive_confidence_required","Adaptive sizing requires a validated strategy confidence.",status="rejected")
-        factor=max(.5,min(1.5,confidence/minimum_confidence))
+        factor=max(.5,min(1.5,confidence/max(.01,minimum_confidence)))
         return min(1,float(policy.get("maximum_risk_pct",base)),max(float(policy.get("minimum_risk_pct",base)),float(policy.get("base_risk_pct",base))*factor))
 
     @staticmethod
