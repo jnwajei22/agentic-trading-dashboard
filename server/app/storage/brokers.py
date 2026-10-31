@@ -14,6 +14,7 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.config.settings import settings
+from app.storage.events import record_event
 from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 from app.config.crypto import SecretDecryptionError, VersionedSecretCipher
 from app.models.execution_profile_v2 import ExecutionProfileV2, deep_merge, migrate_legacy_profile
@@ -301,6 +302,9 @@ class BrokerRepository:
                     VALUES(?,?,'tradelocker',?,?,?,?,?,?,?,'active',?,?,?)""",
                     (user_id,_ref("conn"),base_url.rstrip('/'),username,encrypted,key_version,server,env,label or server,now,now,now))
                 connection_id = int(cur.lastrowid)
+            ref=db.execute("SELECT public_id FROM broker_connections WHERE id=?",(connection_id,)).fetchone()["public_id"]
+            record_event(db,auth0_sub,"trading_connection_updated" if target else "trading_connection_added",
+                "Trading connection reauthenticated." if target else "Trading connection added.",subject_ref=ref)
         return self.get_connection_by_id(auth0_sub, str(connection_id))
 
     def _row_connection(self, row: sqlite3.Row) -> BrokerConnection:
@@ -482,7 +486,9 @@ class BrokerRepository:
 
     def disable_connection(self, auth0_sub: str, connection_ref: str) -> bool:
         with self._connect() as db:
-            return db.execute("UPDATE broker_connections SET status='disabled',updated_at=? WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",(_now(),connection_ref,auth0_sub)).rowcount==1
+            changed=db.execute("UPDATE broker_connections SET status='disabled',updated_at=? WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",(_now(),connection_ref,auth0_sub)).rowcount==1
+            if changed:record_event(db,auth0_sub,"trading_connection_disabled","Trading connection disabled.",subject_ref=connection_ref)
+            return changed
 
     def connection_needs_discovery(self, auth0_sub: str, connection_ref: str) -> bool:
         with self._connect() as db:
@@ -502,8 +508,10 @@ class BrokerRepository:
     def remove_connection(self,auth0_sub:str,connection_ref:str)->bool:
         with self._connect() as db:
             try:
-                return db.execute("DELETE FROM broker_connections WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",
+                changed=db.execute("DELETE FROM broker_connections WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",
                                   (connection_ref,auth0_sub)).rowcount==1
+                if changed:record_event(db,auth0_sub,"trading_connection_removed","Trading credentials removed.",subject_ref=connection_ref)
+                return changed
             except IntegrityError:
                 raise BrokerStorageError("Delete bound strategies before removing this trading connection.") from None
 
@@ -541,12 +549,29 @@ class BrokerRepository:
         current = self.get_profile(auth0_sub, profile_ref)
         if current is None:
             return None
+        patch = dict(patch)
+        name = patch.pop("name", current["name"]).strip()
+        if not name or len(name)>64:raise BrokerStorageError("Profile name must contain 1 to 64 characters.")
+        automation = patch.pop("automation", {})
+        mode=automation.get("execution_mode",current["execution_mode"])
+        if mode not in {"read_only","demo_manual","demo_autonomous","disabled"}:raise BrokerStorageError("Invalid execution permission.")
+        if mode in {"demo_manual","demo_autonomous"} and (current.get("account_environment")!="demo" or current.get("is_demo")!=1):
+            raise BrokerStorageError("Demo execution requires a verified demo account.")
+        provider=automation.get("decision_provider",current.get("decision_provider") or "no_trade")
+        if provider not in {"openai","no_trade"}:raise BrokerStorageError("Unsupported decision provider.")
+        model=automation.get("model_identifier",current.get("model_identifier"))
+        model=(model or "").strip() or None
+        if provider=="openai" and not model:model=settings.autonomous_decision_model or settings.agent_model
+        cooldown=automation.get("cooldown_minutes_after_loss",current.get("cooldown_minutes_after_loss",60))
+        if not isinstance(cooldown,int) or not 0<=cooldown<=1440:raise BrokerStorageError("Loss cooldown must be between 0 and 1440 minutes.")
+        news=automation.get("news_filter_enabled",current.get("news_filter_enabled",True))
+        if not isinstance(news,(bool,int)):raise BrokerStorageError("News validation must be enabled or disabled.")
         normalized = ExecutionProfileV2.model_validate(deep_merge(current["profile_v2"], patch))
         value = normalized.model_dump(mode="json")
         allocation=value["capital_allocation"]
         peers=[item for item in self.list_profiles(auth0_sub) if item["account_id"]==current["account_id"]
                and item["public_id"]!=profile_ref and item.get("enabled") and item.get("migration_state")=="native_v2"]
-        if not allocation.get("allow_shared_capital"):
+        if value["enabled"] and not allocation.get("allow_shared_capital"):
             exclusive=[allocation,*[item["profile_v2"]["capital_allocation"] for item in peers
                          if not item["profile_v2"]["capital_allocation"].get("allow_shared_capital")]]
             if sum(float(item.get("equity_percentage") or 0) for item in exclusive if item.get("mode")=="equity_percentage")>100:
@@ -563,10 +588,15 @@ class BrokerRepository:
         universe = value["market_universe"]
         legacy_instruments = universe["included_instrument_ids"] if universe["mode"] == "custom" else current["allowed_instruments"]
         with self._connect() as db:
+            if db.execute("SELECT 1 FROM execution_profiles WHERE user_id=(SELECT id FROM users WHERE auth0_sub=?) AND lower(name)=lower(?) AND public_id<>?",(auth0_sub,name,profile_ref)).fetchone():
+                raise BrokerStorageError("That profile name is already in use.")
             db.execute("""UPDATE execution_profiles SET profile_v2_json=?,risk_json=?,allowed_instruments_json=?,
-                minimum_confidence=?,enabled=?,updated_at=? WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)""",
+                minimum_confidence=?,enabled=?,name=?,execution_mode=?,decision_provider=?,model_identifier=?,news_filter_enabled=?,
+                cooldown_minutes_after_loss=?,autonomous_armed=0,armed_until=NULL,updated_at=? WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)""",
                 (json.dumps(value), json.dumps(legacy_risk), json.dumps(legacy_instruments),
-                 value["trading_policy"]["minimum_confidence"], value["enabled"], _now(), profile_ref, auth0_sub))
+                 value["trading_policy"]["minimum_confidence"], value["enabled"], name,mode,provider,model,news,cooldown,_now(), profile_ref, auth0_sub))
+            record_event(db,auth0_sub,"profile_updated",f"Updated strategy {name}",subject_ref=profile_ref,profile_ref=profile_ref,
+                account_ref=current["account_id"],details={"name":name,"enabled":value["enabled"],"execution_mode":mode,"decision_provider":provider,"changed_fields":sorted(patch.keys())+sorted(automation.keys())})
         return self.get_profile(auth0_sub, profile_ref)
 
     def validate_profile_capital(self,auth0_sub:str,profile_ref:str,account_equity:float)->None:
@@ -663,6 +693,9 @@ class BrokerRepository:
                 risk_json,allowed_instruments_json,session_rules_json,news_filter_enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (_ref("profile"),user["id"],account["id"],template["id"],name,execution_mode,json.dumps(policy),json.dumps(instruments),json.dumps(session_rules or {}),news_filter_enabled,now,now))
             except IntegrityError: raise BrokerStorageError("That profile name is already in use.") from None
+            created=db.execute("SELECT public_id FROM execution_profiles WHERE user_id=? AND name=?",(user["id"],name)).fetchone()["public_id"]
+            record_event(db,auth0_sub,"profile_created",f"Created strategy {name}",subject_ref=created,profile_ref=created,
+                account_ref=account_ref,details={"name":name,"execution_mode":execution_mode})
         return next(p for p in self.list_profiles(auth0_sub) if p["name"].lower()==name.lower())
 
     def update_profile(self, auth0_sub: str, profile_ref: str, *, name: str | None=None,
@@ -735,8 +768,15 @@ class BrokerRepository:
             return cur.rowcount==1
 
     def delete_profile(self, auth0_sub: str, profile_ref: str) -> bool:
+        profile=self.get_profile(auth0_sub,profile_ref)
+        if not profile:return False
         with self._connect() as db:
-            return db.execute("DELETE FROM execution_profiles WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",(profile_ref,auth0_sub)).rowcount==1
+            # Delete the owned schedule in the same transaction; dispatches cascade while run audits remain.
+            if using_postgres() or db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='autonomous_schedules'").fetchone():
+                db.execute("DELETE FROM autonomous_schedules WHERE user_sub=? AND profile_ref=?",(auth0_sub,profile_ref))
+            changed=db.execute("DELETE FROM execution_profiles WHERE public_id=? AND user_id=(SELECT id FROM users WHERE auth0_sub=?)",(profile_ref,auth0_sub)).rowcount==1
+            if changed:record_event(db,auth0_sub,"profile_deleted",f"Deleted strategy {profile['name']}",subject_ref=profile_ref,profile_ref=profile_ref,account_ref=profile["account_id"],details={"name":profile["name"]})
+            return changed
 
     def status(self, auth0_sub: str) -> dict:
         account=self.get_account_record(auth0_sub)

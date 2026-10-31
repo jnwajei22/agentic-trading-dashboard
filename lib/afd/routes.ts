@@ -9,7 +9,7 @@ const exact: Record<string, readonly string[]> = {
   "markets/overview": ["GET"], "markets/search": ["GET"], "markets/news": ["GET"],
   "markets/calendar": ["GET"], "markets/chart": ["GET"],
   "user-preferences": ["GET", "PATCH"], "watchlists": ["GET", "POST"],
-  "activity": ["GET"], "status": ["GET"],
+  "activity": ["GET"], "status": ["GET"], "workspace-export": ["GET"], "autonomous-schedule-preview": ["POST"],
   "assistant/conversations": ["GET"],
   "providers": ["GET"], "trading/connections": ["GET"], "trading/accounts": ["GET"],
   "trading/order-calculations": ["POST"],

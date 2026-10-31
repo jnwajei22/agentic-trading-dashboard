@@ -59,7 +59,7 @@ def test_schema_and_runtime_role():
     assert check_database() == {'backend':'postgres','ready':True}
     with connect() as db:
         assert db.execute('SELECT current_user').fetchone()[0] == 'desk_runtime'
-        assert db.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='desk'").fetchone()[0] == 31
+        assert db.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='desk'").fetchone()[0] == 32
         with pytest.raises(DatabaseUnavailable): db.execute('CREATE TABLE forbidden(id int)')
 
 
@@ -225,3 +225,18 @@ def test_named_bindings_preserve_casts_and_repeated_values():
         row=db.execute("SELECT :amount::numeric + :amount::numeric AS total, ':literal ?' AS label, :flag AS enabled",
                        {'flag':True,'amount':1.25}).fetchone()
     assert row['total']==2.5 and row['label']==':literal ?' and row['enabled']==1
+
+
+def test_operations_journal_is_owner_scoped_and_rolls_back_with_mutation():
+    from app.storage.events import record_event, WorkspaceEventRepository
+    owner=settings.workspace_owner_sub
+    with connect() as db:
+        record_event(db,owner,'profile_updated','Saved strategy',details={'name':'Test','password':'must-not-store'})
+    rows=WorkspaceEventRepository().list(owner)
+    assert len(rows)==1 and rows[0]['details']=={'name':'Test'}
+    assert WorkspaceEventRepository().list('unrelated-owner')==[]
+    with pytest.raises(RuntimeError):
+        with connect() as db:
+            record_event(db,owner,'schedule_created','Must roll back')
+            raise RuntimeError('transaction failed')
+    assert len(WorkspaceEventRepository().list(owner))==1

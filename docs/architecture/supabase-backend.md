@@ -12,7 +12,7 @@ The limited SQL compatibility boundary retains established repository contracts 
 
 ## Deployable schema
 
-`supabase/schema.sql` is the current fresh-install schema: 30 product/runtime tables plus one schema-version table, built-in strategy templates, constraints and indexes. It supersedes the earlier 19-table design proposal for this release. It contains no imported users, accounts, credentials or SQLite rows. Monetary/quantity/risk columns use fixed-scale NUMERIC; repository responses retain the existing numeric Python/JSON contract. Epoch leases use double precision and existing ISO timestamp contracts remain text in this compatibility release.
+`supabase/schema.sql` is the current fresh-install schema: 31 product/runtime tables plus one schema-version table, built-in strategy templates, constraints and indexes. It supersedes the earlier 19-table design proposal for this release. It contains no imported users, accounts, credentials or SQLite rows. Monetary/quantity/risk columns use fixed-scale NUMERIC; repository responses retain the existing numeric Python/JSON contract. Epoch leases use double precision and existing ISO timestamp contracts remain text in this compatibility release.
 
 Everything lives in the private `desk` schema. PUBLIC has no schema access. Every table has RLS enabled; only the NOLOGIN `desk_runtime` role gets product data access. Its policy deliberately permits the shared server workspace; it is not a claim of user authentication or per-user RLS. Browser roles have no grants or policies. The server database login must be allowed to SET ROLE desk_runtime. Do not expose `desk` through Supabase's Data API and do not place database/service credentials in NEXT_PUBLIC variables.
 
@@ -44,3 +44,9 @@ Local PGlite tests use one underlying PostgreSQL WASM connection; they do not es
 No hosted project was changed while the selected organization was inaccessible. No SQLite data migration, Neon access or trade execution is part of this implementation.
 
 References: [Supabase connections](https://supabase.com/docs/guides/database/connecting-to-postgres), [pooler prepared statements](https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL).
+
+## Additive Operations upgrade
+
+For an existing installation, apply `supabase/migrations/20261031025418_operations_events.sql` before deploying the Operations journal code. Do not rerun the fresh installer against an existing `desk` schema. The new private table records safe profile, schedule, and connection changes in the same transaction as the change. Run history, control audits, and broker executions remain in their existing tables. Journal reads are owner-scoped at the server boundary.
+
+The inbox uses notification preferences from Postgres and a read cursor stored in the current browser. It polls visible pages every 30 seconds; it does not send emails or claim to run a background daily-summary service. Workspace JSON export excludes credentials, API keys, conversations, and model prompts. CSV exports prefix formula-like values before quoting.

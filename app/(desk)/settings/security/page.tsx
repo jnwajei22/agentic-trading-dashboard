@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatusPill } from "@/components/desk/status-pill"
 
 export const metadata = { title: "Security" }
-export default async function Page() { const session = await workspaceSession(); let connections: Connection[] = []; try { connections = (await (await workspaceBackendClient())<{ connections: Connection[] }>("/api/broker/connections")).connections ?? [] } catch {} const verified = connections.map(item => item.last_verified_at).filter(Boolean).sort().at(-1)
+export default async function Page() { const session = await workspaceSession(); let connections: Connection[] = []; try { connections = (await (await workspaceBackendClient())<{ connections: Connection[] }>("/api/broker/connections")).connections ?? [] } catch {} connections=connections.filter(item=>item.enabled); const verified = connections.map(item => item.last_verified_at).filter(Boolean).sort().at(-1)
 return <div className="space-y-7"><SettingsPageHeader title="Security" description="Review shared workspace access and connected trading platforms." />
   <div className="grid gap-4 lg:grid-cols-2">
     <Card><CardHeader><div className="flex items-center justify-between"><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />Workspace access</CardTitle><StatusPill label="No login" tone="warn" /></div></CardHeader><CardContent className="space-y-4 text-sm"><Datum label="Workspace" value={session.user.name} /><p className="text-muted-foreground">Anyone who can reach this desk can use this shared workspace. Mode restrictions, explicit approvals, and trading controls still apply.</p></CardContent></Card>

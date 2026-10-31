@@ -59,7 +59,7 @@ def normalize_recurrence(value:dict[str,Any]|None,legacy_times:list[str]|None=No
         validate_local_times([start,end]);minutes=int(raw.get("interval_minutes") or 60)
         if minutes<15 or minutes>1440:raise ScheduleStorageError("Interval must be between 15 and 1440 minutes.")
         first=datetime.strptime(start,"%H:%M");last=datetime.strptime(end,"%H:%M")
-        if last<first:raise ScheduleStorageError("The interval end time must be after its start time.")
+        if last<first:last+=timedelta(days=1)
         times=[];current=first
         while current<=last and len(times)<96:
             times.append(current.strftime("%H:%M"));current+=timedelta(minutes=minutes)
@@ -101,12 +101,26 @@ def next_recurrence_utc(after:datetime,timezone_name:str,recurrence:dict[str,Any
     try:zone=ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError:raise ScheduleStorageError("The schedule timezone is not a valid IANA timezone.") from None
     local_after=after.astimezone(zone);allowed=set(normalized["days"])
-    for offset in range(15):
+    candidates=[]
+    # Session clocks follow their financial centre, independently of the display timezone.
+    centres={"sydney":("Australia/Sydney","08:00"),"tokyo":("Asia/Tokyo","09:00"),
+        "asia":("Asia/Tokyo","09:00"),"london":("Europe/London","08:00"),
+        "new_york":("America/New_York","08:00"),"overlap":("America/New_York","08:00"),
+        "london_new_york_overlap":("America/New_York","08:00")}
+    for offset in range(-1,16):
         day=local_after.date()+timedelta(days=offset)
-        if WEEKDAYS[day.weekday()] not in allowed:continue
-        candidates=[instant for item in normalized["times"] for instant in _valid_instants(day,item,zone)]
-        future=[candidate for candidate in sorted(candidates) if candidate>after.astimezone(timezone.utc)]
-        if future:return future[0]
+        if normalized["type"]=="market_session":
+            for session in normalized["sessions"]:
+                centre,clock=centres[session]
+                for instant in _valid_instants(day,clock,ZoneInfo(centre)):
+                    if WEEKDAYS[instant.astimezone(zone).weekday()] in allowed:candidates.append(instant)
+        elif WEEKDAYS[day.weekday()] in allowed:
+            overnight=normalized["type"]=="recurring_interval" and normalized["end_time"]<normalized["start_time"]
+            for item in normalized["times"]:
+                target=day+timedelta(days=1) if overnight and item<normalized["start_time"] else day
+                candidates.extend(_valid_instants(target,item,zone))
+    future=sorted(candidate for candidate in set(candidates) if candidate>after.astimezone(timezone.utc))
+    if future:return future[0]
     raise ScheduleStorageError("Unable to calculate the next schedule occurrence.")
 
 
@@ -150,7 +164,8 @@ class AutonomousScheduleService:
         profile=self._profile(user_sub,profile_ref);rule=normalize_recurrence(recurrence,local_times)
         times=rule["times"]
         if not 30<=maximum_lateness_seconds<=3600:raise ScheduleStorageError("Maximum lateness must be between 30 and 3600 seconds.")
-        next_run=next_recurrence_utc(utcnow(),timezone_name,rule).isoformat() if enabled else None
+        calculated=next_recurrence_utc(utcnow(),timezone_name,rule).isoformat()
+        next_run=calculated if enabled else None
         return self._present(self.schedules.upsert_schedule(user_sub,profile_ref,timezone_name=timezone_name,
             local_times=times,recurrence=rule,enabled=enabled,next_run_at=next_run,
             maximum_lateness_seconds=maximum_lateness_seconds),profile)
@@ -229,8 +244,12 @@ class AutonomousScheduleService:
         if schedule.get("enabled"):
             for _ in range(5):cursor=next_recurrence_utc(cursor,schedule["timezone"],recurrence);previews.append(cursor.isoformat())
         result["next_run_times"]=previews
-        result["next_eligible_trading_run"]=(next_likely_eligible_utc(utcnow(),schedule["timezone"],recurrence["times"],profile).isoformat()
-            if schedule.get("enabled") and profile else None)
+        eligible=None;cursor=utcnow()
+        if schedule.get("enabled") and profile:
+            for _ in range(400):
+                cursor=next_recurrence_utc(cursor,schedule["timezone"],recurrence)
+                if _likely_open(profile,cursor):eligible=cursor.isoformat();break
+        result["next_eligible_trading_run"]=eligible
         return result
 
 

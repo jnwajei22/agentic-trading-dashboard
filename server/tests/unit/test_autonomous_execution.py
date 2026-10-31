@@ -802,6 +802,7 @@ def submission_service(tmp_path, monkeypatch, client, *, origin="autonomous"):
         return ({"finnhub": {"available": True, "stale": False},
                  "fred": {"available": True, "stale": False}}, [], {})
     service.context = bound_context
+    monkeypatch.setattr(service.brokers,"get_profile",lambda user,ref:{"public_id":ref,"execution_mode":"demo_autonomous"} if user=="user" and ref=="profile-a" else None)
     service._provider_state = providers
     service._kill_switch = lambda *_: False
     return service, repository, preview["id"], seen_client_args

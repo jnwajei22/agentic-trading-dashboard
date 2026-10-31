@@ -525,8 +525,15 @@ class ExecutionRepository:
 
     def recent_executions(self,user_sub:str,limit:int=20)->list[dict[str,Any]]:
         with self._connect() as db:
-            actions=db.execute("SELECT id,action_type,state,target_id,error_category,created_at,completed_at FROM demo_action_executions WHERE user_sub=? ORDER BY created_at DESC LIMIT ?",(user_sub,limit)).fetchall()
-            runs=db.execute("SELECT id,decision action_type,result_status state,broker_order_id target_id,NULL error_category,created_at,completed_at FROM autonomous_runs WHERE user_sub=? ORDER BY created_at DESC LIMIT ?",(user_sub,limit)).fetchall()
+            actions=db.execute("""SELECT e.id,e.action_type,e.state,e.target_id,e.error_category,e.created_at,e.completed_at,
+                p.profile_ref,p.account_record_id,p.account_alias,p.acc_num account_number
+                FROM demo_action_executions e LEFT JOIN demo_action_previews p ON p.id=e.preview_id AND p.user_sub=e.user_sub
+                WHERE e.user_sub=? ORDER BY e.created_at DESC LIMIT ?""",(user_sub,limit)).fetchall()
+            runs=db.execute("""SELECT r.id,r.decision action_type,r.result_status state,r.broker_order_id target_id,
+                NULL error_category,r.created_at,r.completed_at,p.profile_ref,p.account_record_id,p.account_alias,
+                r.acc_num account_number,r.selected_pair symbol
+                FROM autonomous_runs r LEFT JOIN autonomous_order_previews p ON p.id=r.preview_id AND p.user_sub=r.user_sub
+                WHERE r.user_sub=? ORDER BY r.created_at DESC LIMIT ?""",(user_sub,limit)).fetchall()
             decisions=db.execute("""SELECT id,'autonomous_decision' action_type,state,profile_ref target_id,
                 CASE WHEN reason_codes_json='[]' THEN NULL ELSE reason_codes_json END error_category,created_at,completed_at
                 FROM autonomous_decision_runs WHERE user_sub=? ORDER BY created_at DESC LIMIT ?""",(user_sub,limit)).fetchall()

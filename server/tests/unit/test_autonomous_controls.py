@@ -38,7 +38,7 @@ def test_environment_controls_replace_timed_authorization(tmp_path, monkeypatch)
     profile = {
         "enabled": True, "account_available": True, "broker_active": True,
         "locally_enabled": True, "account_environment": "demo", "is_demo": 1,
-        "allowed_sessions": [], "decision_provider": "no_trade",
+        "allowed_sessions": [], "decision_provider": "no_trade", "execution_mode":"demo_autonomous",
         "autonomous_armed": False, "armed_until": "2000-01-01T00:00:00+00:00",
     }
     now = datetime(2026, 1, 14, 14, tzinfo=timezone.utc)
@@ -58,7 +58,8 @@ def test_live_toggle_fails_closed_without_live_execution_path(tmp_path, monkeypa
     profile = {"enabled": True, "account_available": True, "broker_active": True, "locally_enabled": True,
         "account_environment": "live", "is_demo": 0, "allowed_sessions": [], "decision_provider": "no_trade"}
     reasons = runner._blocking_reasons(profile, datetime(2026, 1, 14, 14, tzinfo=timezone.utc), "user")
-    assert reasons == ["live_autonomous_execution_not_implemented"]
+    assert "live_autonomous_execution_not_implemented" in reasons
+    assert "autonomous_permission_required" in reasons
 
 
 def test_missing_openai_configuration_blocks_before_any_broker_operation(tmp_path, monkeypatch):
@@ -130,5 +131,5 @@ def test_profile_deletion_can_detach_schedule_and_preserves_execution_history(tm
     assert schedules.disable_profile_schedule("demo", profile["public_id"])
     assert brokers.delete_profile("demo", profile["public_id"])
 
-    assert schedules.list_schedules("demo")[0]["enabled"] is False
+    assert schedules.list_schedules("demo") == []
     assert execution.get_run("demo", "historical-run") is not None

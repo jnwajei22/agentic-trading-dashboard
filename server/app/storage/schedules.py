@@ -12,6 +12,8 @@ from uuid import uuid4
 from app.config.settings import settings
 from app.storage.database import connect, storage_path, using_postgres, IntegrityError
 
+from app.storage.events import record_event
+
 logger=logging.getLogger(__name__)
 
 
@@ -90,6 +92,9 @@ class ScheduleRepository:
                 updated_at=excluded.updated_at,disabled_at=excluded.disabled_at""",
                 (schedule_id,user_sub,profile_ref,timezone_name,expression,enabled,next_run_at,maximum_lateness_seconds,
                  created,now,None if enabled else now))
+            record_event(db,user_sub,"schedule_updated" if existing else "schedule_created",
+                "Schedule saved.",subject_ref=schedule_id,profile_ref=profile_ref,
+                details={"enabled":enabled,"timezone":timezone_name,"schedule_type":payload.get("type")})
         return self.get_schedule(user_sub,schedule_id) or {}
 
     def get_schedule(self,user_sub:str,schedule_id:str)->dict[str,Any]|None:
@@ -105,7 +110,12 @@ class ScheduleRepository:
         return [self._decode(row) for row in rows]
 
     def delete_schedule(self,user_sub:str,schedule_id:str)->bool:
-        with self._connect() as db:return db.execute("DELETE FROM autonomous_schedules WHERE id=? AND user_sub=?",(schedule_id,user_sub)).rowcount==1
+        with self._connect() as db:
+            row=db.execute("SELECT profile_ref FROM autonomous_schedules WHERE id=? AND user_sub=?",(schedule_id,user_sub)).fetchone()
+            if not row:return False
+            db.execute("DELETE FROM autonomous_schedules WHERE id=? AND user_sub=?",(schedule_id,user_sub))
+            record_event(db,user_sub,"schedule_deleted","Schedule deleted.",subject_ref=schedule_id,profile_ref=row["profile_ref"])
+            return True
 
     def disable_profile_schedule(self,user_sub:str,profile_ref:str)->bool:
         now=utcnow().isoformat()
@@ -117,8 +127,13 @@ class ScheduleRepository:
     def set_enabled(self,user_sub:str,schedule_id:str,enabled:bool,next_run_at:str|None)->bool:
         now=utcnow().isoformat()
         with self._connect() as db:
-            return db.execute("""UPDATE autonomous_schedules SET enabled=?,next_run_at=?,disabled_at=?,updated_at=?
-                WHERE id=? AND user_sub=?""",(enabled,next_run_at,None if enabled else now,now,schedule_id,user_sub)).rowcount==1
+            row=db.execute("SELECT profile_ref FROM autonomous_schedules WHERE id=? AND user_sub=?",(schedule_id,user_sub)).fetchone()
+            if not row:return False
+            db.execute("""UPDATE autonomous_schedules SET enabled=?,next_run_at=?,disabled_at=?,updated_at=?
+                WHERE id=? AND user_sub=?""",(enabled,next_run_at,None if enabled else now,now,schedule_id,user_sub))
+            record_event(db,user_sub,"schedule_resumed" if enabled else "schedule_paused",
+                "Schedule resumed." if enabled else "Schedule paused.",subject_ref=schedule_id,profile_ref=row["profile_ref"])
+            return True
 
     def claim_due(self,*,worker_id:str,now:datetime,lease_seconds:int,limit:int,
                   next_run:Callable[[dict[str,Any],datetime],datetime])->list[dict[str,Any]]:

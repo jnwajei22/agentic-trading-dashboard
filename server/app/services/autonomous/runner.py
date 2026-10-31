@@ -20,7 +20,7 @@ FINAL_STATES={"trade","no_trade","blocked","market_closed","error","skipped"}
 SAFE_PRE_SUBMIT_RETRY_REASONS={"provider_unavailable","market_snapshot_unavailable","broker_unreachable",
     "account_mapping_unavailable","account_status_unavailable","runner_internal_error",
     "tradelocker_rate_limit_exhausted"}
-DRY_RUN_IGNORED_REASONS={"profile_disabled","global_autonomous_kill_switch_enabled",
+DRY_RUN_IGNORED_REASONS={"autonomous_permission_required","profile_disabled","global_autonomous_kill_switch_enabled",
     "demo_autonomous_disabled","live_autonomous_disabled","live_autonomous_execution_not_implemented"}
 logger=logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class AutonomousDecisionRunner:
 
     def _blocking_reasons(self,profile:dict[str,Any],now:datetime,user_sub:str|None=None)->list[str]:
         reasons=[]
+        if profile.get("execution_mode")!="demo_autonomous":reasons.append("autonomous_permission_required")
         if not profile.get("enabled"):reasons.append("profile_disabled")
         if not profile.get("account_available",True) or not profile.get("broker_active",True) or not profile.get("locally_enabled",True):
             reasons.append("account_unavailable")

@@ -977,6 +977,13 @@ class AutonomousDemoService:
         )
         return {"schema_version": "1.0", "status": "approved", "preview_id": preview_id, "snapshot_id": proposal.snapshot_id, "pair": pair, "side": proposal.side, "order_type": proposal.order_type, "entry": proposal.entry, "stop_loss": proposal.stop_loss, "take_profit": proposal.take_profit, **size, "estimated_reward": estimated_reward, "reward_risk": calculation["reward_risk"], "calculation": calculation, "warnings": list(dict.fromkeys(warnings)), "expires_at": record["expires_at"], "violations": []}
 
+    def _require_submission_permission(self,user_sub:str,profile_ref:str,*,autonomous:bool=False)->None:
+        profile=self.brokers.get_profile(user_sub,profile_ref)
+        if not profile:raise AutonomousExecutionError("profile_not_found","The strategy is unavailable.",status="rejected")
+        allowed={"demo_autonomous"} if autonomous else {"demo_manual","demo_autonomous"}
+        if profile.get("execution_mode") not in allowed:
+            raise AutonomousExecutionError("execution_permission_required","This strategy does not permit the requested demo submission.",status="rejected")
+
     async def submit(self, user_sub: str, preview_id: str, idempotency_key: str, *, before_dispatch=None) -> dict[str, Any]:
         preview = self.execution.get_preview(preview_id)
         if not preview or preview["user_sub"] != user_sub:
@@ -1001,6 +1008,7 @@ class AutonomousDemoService:
                 "entry": preview["entry"], "stop_loss": preview["stop_loss"],
                 "take_profit": preview["take_profit"],
             }
+        self._require_submission_permission(user_sub,preview.get("profile_ref") or "",autonomous=preview.get("execution_origin")=="autonomous")
         context = await self.context(user_sub, preview.get("profile_ref") or "",allow_autonomous=preview.get("execution_origin")=="autonomous")
         routing_fields = ("connection_id","account_id","acc_num","environment","profile_ref","account_record_id","connection_ref","account_alias","server","base_url","demo_classification")
         current = {"connection_id":context.connection_id,"account_id":context.account_id,"acc_num":context.acc_num,"environment":context.environment,
@@ -1555,6 +1563,7 @@ class AutonomousDemoService:
             return self._action_result(existing)
         if preview["status"]!="approved" or datetime.fromisoformat(preview["expires_at"])<=utcnow():
             raise AutonomousExecutionError("preview_expired_or_unapproved","The action preview is expired or not approved.",status="rejected")
+        self._require_submission_permission(user_sub,preview["profile_ref"])
         context=await self.context(user_sub,preview["profile_ref"])
         current=(context.profile_ref,context.account_record_id,context.connection_ref,context.connection_id,context.account_id,context.acc_num,context.environment,context.server,context.base_url,context.demo_classification)
         stored=tuple(preview[key] for key in ("profile_ref","account_record_id","connection_ref","connection_id","account_id","acc_num","environment","server","base_url","demo_classification"))

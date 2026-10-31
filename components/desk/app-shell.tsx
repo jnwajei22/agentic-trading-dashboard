@@ -16,7 +16,9 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import type { Account } from "@/lib/afd/contracts";
+import { PreferencesProvider } from "./preferences-provider";
+import { NotificationInbox } from "./notification-inbox";
+import type { UserPreferences, Account } from "@/lib/afd/contracts";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -88,18 +90,19 @@ type ShellProps = {
   children: React.ReactNode;
   user: { name?: string | null; email?: string | null };
   accounts: Account[];
+  preferences: UserPreferences|null;
 };
-export function AppShell({ children, accounts, ...props }: ShellProps) {
+export function AppShell({ children, accounts, preferences, ...props }: ShellProps) {
   return (
-    <AccountProvider accounts={accounts}>
+    <PreferencesProvider initial={preferences}><AccountProvider accounts={accounts}>
       <ShellContent {...props}>{children}</ShellContent>
-    </AccountProvider>
+    </AccountProvider></PreferencesProvider>
   );
 }
 function ShellContent({
   children,
   user,
-}: Omit<ShellProps, "accounts">) {
+}: Omit<ShellProps, "accounts"|"preferences">) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   return (
@@ -166,6 +169,7 @@ function ShellContent({
           <div className="hidden md:block">
             <CommandPalette />
           </div>
+          <NotificationInbox />
           <ThemeToggle />
           <div className="ml-2 hidden items-center gap-3 border-l border-border/50 pl-5 sm:flex">
             <span
