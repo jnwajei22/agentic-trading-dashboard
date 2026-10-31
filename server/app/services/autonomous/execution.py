@@ -438,7 +438,8 @@ class AutonomousDemoService:
                 config_key="ordersConfig",data_key="orders")
         finally:await client.aclose()
         classified=classify_orders(positions,orders)["counts"]
-        ownership=self.execution.profile_broker_ids(context.user_sub,context.profile_ref)
+        ownership=self.execution.profile_broker_ids(context.user_sub,context.profile_ref,
+            live_position_ids={str(_find_value(row,("positionId","id"))) for row in positions})
         metrics=profile_attributed_capital_metrics(positions,orders,owned_position_ids=ownership["position_ids"],owned_order_ids=ownership["order_ids"])
         metrics["open_risk_amount"]=max(metrics["open_risk_amount"],ownership["estimated_open_risk"])
         metrics["margin_used"]=max(metrics["margin_used"],ownership["estimated_margin_used"])
@@ -765,7 +766,8 @@ class AutonomousDemoService:
                 if pending_entries >= context.risk["maximum_pending_orders"] else []),
             "order_classification": classified,
         }
-        ownership=self.execution.profile_broker_ids(user_sub,context.profile_ref)
+        ownership=self.execution.profile_broker_ids(user_sub,context.profile_ref,
+            live_position_ids={str(_find_value(row,("positionId","id"))) for row in positions})
         metrics=profile_attributed_capital_metrics(positions,orders,owned_position_ids=ownership["position_ids"],owned_order_ids=ownership["order_ids"],order_history=order_history)
         metrics["open_risk_amount"]=max(metrics["open_risk_amount"],ownership["estimated_open_risk"])
         metrics["margin_used"]=max(metrics["margin_used"],ownership["estimated_margin_used"])
@@ -1081,7 +1083,8 @@ class AutonomousDemoService:
                 mapped_positions = map_configured_rows(config_response=config, data_response=before_positions, config_key="positionsConfig", data_key="positions")
                 mapped_orders = map_configured_rows(config_response=config, data_response=before_orders, config_key="ordersConfig", data_key="orders")
                 classified = classify_orders(mapped_positions, mapped_orders)
-                ownership=self.execution.profile_broker_ids(user_sub,context.profile_ref)
+                ownership=self.execution.profile_broker_ids(user_sub,context.profile_ref,
+                    live_position_ids={str(_find_value(row,("positionId","id"))) for row in mapped_positions})
                 metrics=profile_attributed_capital_metrics(mapped_positions,mapped_orders,
                     owned_position_ids=ownership["position_ids"],owned_order_ids=ownership["order_ids"])
                 metrics["open_risk_amount"]=max(metrics["open_risk_amount"],ownership["estimated_open_risk"])

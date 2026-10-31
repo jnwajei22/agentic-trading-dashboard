@@ -973,3 +973,17 @@ def test_market_zero_request_price_requires_positive_fill_and_missing_time_canno
     args[2]["d"][0][-1] = None
     assert AutonomousDemoService._reconcile(*args, {})["verified"] is False
     assert AutonomousDemoService._reconcile(*args, {"orderId":"432345564236299554"})["verified"] is True
+
+@pytest.mark.asyncio
+async def test_closed_position_releases_reserved_estimates_but_retains_ownership(tmp_path, monkeypatch):
+    client = SubmissionClient()
+    service, repository, preview_id, _ = submission_service(tmp_path, monkeypatch, client)
+    await service.submit("user", preview_id, "risk:ownership-key")
+    submission = repository.get_submission(preview_id=preview_id)
+    repository.update_submission(submission["id"], broker_position_id="closed-position")
+    open_state = repository.profile_broker_ids("user", "profile-a", live_position_ids={"closed-position"})
+    assert open_state["estimated_open_risk"] == 100
+    flat_state = repository.profile_broker_ids("user", "profile-a", live_position_ids=set())
+    assert flat_state["estimated_open_risk"] == flat_state["estimated_margin_used"] == 0
+    assert flat_state["position_ids"] == {"closed-position"}
+    assert not repository.profile_broker_ids("other-user", "profile-a", live_position_ids={"closed-position"})["position_ids"]

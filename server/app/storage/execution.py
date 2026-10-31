@@ -358,16 +358,19 @@ class ExecutionRepository:
             ).fetchone()
         return row is not None
 
-    def profile_broker_ids(self,user_sub:str,profile_ref:str)->dict[str,Any]:
+    def profile_broker_ids(self,user_sub:str,profile_ref:str, *, live_position_ids: set[str] | None = None)->dict[str,Any]:
         with self._connect() as db:
             rows=db.execute("""SELECT s.broker_order_id,s.broker_position_id,p.estimated_risk,p.estimated_margin FROM broker_submissions s
                 JOIN autonomous_order_previews p ON p.id=s.preview_id
                 WHERE p.user_sub=? AND p.profile_ref=? AND s.submission_state IN ('submitted','verified','accepted')""",
                 (user_sub,profile_ref)).fetchall()
+        # Ownership history is durable; estimated exposure must follow fresh broker positions.
+        exposed = [row for row in rows if row["broker_position_id"] and
+            (live_position_ids is None or str(row["broker_position_id"]) in live_position_ids)]
         return {"order_ids":{str(row["broker_order_id"]) for row in rows if row["broker_order_id"]},
             "position_ids":{str(row["broker_position_id"]) for row in rows if row["broker_position_id"]},
-            "estimated_open_risk":sum(float(row["estimated_risk"] or 0) for row in rows if row["broker_position_id"]),
-            "estimated_margin_used":sum(float(row["estimated_margin"] or 0) for row in rows if row["broker_position_id"])}
+            "estimated_open_risk":sum(float(row["estimated_risk"] or 0) for row in exposed),
+            "estimated_margin_used":sum(float(row["estimated_margin"] or 0) for row in exposed)}
 
     def claim_submission(self, submission_id: str, preview_id: str, idempotency_key: str, fingerprint: str) -> tuple[bool, dict[str, Any]]:
         now = utcnow().isoformat()
