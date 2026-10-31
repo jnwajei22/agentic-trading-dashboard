@@ -27,7 +27,7 @@ test("header retains synchronized unsaved state and prominent enabled control",(
 test("market selection progressively renders only the active method",()=>{
   assert.match(editor,/method==="all_available"&&/);assert.match(editor,/method==="groups"&&<GroupSelect/)
   assert.match(editor,/method==="custom"&&<InstrumentSelect/)
-  assert.match(editor,/All markets supported by this trading account may be considered/)
+  assert.match(editor,/All supported execution markets available on this account may be considered/)
   assert.doesNotMatch(editor,/freeform|Custom symbol/i)
 })
 test("custom market search is API-backed keyboard accessible stale-safe and duplicate-safe",()=>{

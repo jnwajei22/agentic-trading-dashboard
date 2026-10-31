@@ -372,6 +372,14 @@ class ExecutionRepository:
             "estimated_open_risk":sum(float(row["estimated_risk"] or 0) for row in exposed),
             "estimated_margin_used":sum(float(row["estimated_margin"] or 0) for row in exposed)}
 
+    def managed_positions(self,user_sub:str,profile_ref:str)->list[dict[str,Any]]:
+        with self._connect() as db:
+            rows=db.execute("""SELECT p.*,s.broker_position_id FROM broker_submissions s
+                JOIN autonomous_order_previews p ON p.id=s.preview_id
+                WHERE p.user_sub=? AND p.profile_ref=? AND s.submission_state='verified'
+                    AND s.broker_position_id IS NOT NULL""",(user_sub,profile_ref)).fetchall()
+        return [dict(row) for row in rows]
+
     def claim_submission(self, submission_id: str, preview_id: str, idempotency_key: str, fingerprint: str) -> tuple[bool, dict[str, Any]]:
         now = utcnow().isoformat()
         try:

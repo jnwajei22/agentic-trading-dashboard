@@ -477,6 +477,14 @@ class TradeLockerClient:
         return await self._request("DELETE", f"/trade/positions/{position_id}", operation="close_position",
             headers=self._account_headers(), params={"strategyId": strategy_id}, json={"qty": 0})
 
+    async def update_position_stop(self,position_id:str,stop_loss:float,*,strategy_id:str)->Any:
+        """Change only the stop; omit takeProfit so existing broker protection is retained."""
+        import math
+        if not str(position_id).isdigit() or not math.isfinite(stop_loss) or stop_loss<=0:
+            raise TradeLockerError("update_position_stop","A valid position and positive stop price are required.",code="invalid_position")
+        return await self._request("PATCH",f"/trade/positions/{position_id}",operation="update_position_stop",
+            headers=self._account_headers(),params={"strategyId":strategy_id},json={"stopLoss":stop_loss})
+
     async def get_quote(self, symbol: str) -> Any:
         instrument_id, route_id = await self._resolve_instrument(symbol)
         async def read():

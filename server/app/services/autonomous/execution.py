@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any, Callable
@@ -83,6 +83,8 @@ class InstrumentMetadata:
     leverage: float | None = None
     tick_size: float | None = None
     price_precision: int | None = None
+    decision_confidence: float | None = None
+    authorized_risk_percent: float | None = None
 
 
 def normalize_pair(pair: str) -> str:
@@ -316,7 +318,7 @@ class AutonomousDemoService:
     @staticmethod
     def _provider_requirements(context: VerifiedDemoContext, autonomous: bool) -> tuple[bool, bool]:
         config = context.risk.get("strategy_config", {})
-        finnhub_required = autonomous or bool(
+        finnhub_required = autonomous or bool(context.risk.get("news_filter_enabled",False)) or bool(
             config.get("require_finnhub_for_manual") or config.get("required_market_events")
         )
         fred_required = bool(config.get("required_macro_series"))
@@ -338,7 +340,7 @@ class AutonomousDemoService:
                       allow_autonomous: bool = False) -> VerifiedDemoContext:
         """Resolve execution exclusively through an owned profile; dashboard defaults are never read here."""
         try:
-            resolved = BrokerAccountResolver(self.brokers).resolve(user_sub, profile=profile_ref)
+            resolved = BrokerAccountResolver(self.brokers).resolve(user_sub, profile=profile_ref,allow_disabled_profile=not require_mode)
         except AccountResolutionError as exc:
             raise AutonomousExecutionError(exc.code, str(exc)) from exc
         profile = next((item for item in self.brokers.list_profiles(user_sub) if item["public_id"] == resolved.profile_ref), None)
@@ -348,8 +350,10 @@ class AutonomousDemoService:
         risk = self.execution.get_or_create_settings(user_sub, resolved.connection_id, resolved.account_id, resolved.account_number)
         risk.update(profile.get("risk") or {})
         v2_risk=(profile.get("profile_v2") or {}).get("risk_policy") or {}
+        risk["risk_policy"]=v2_risk
+        risk["minimum_confidence"]=profile.get("minimum_confidence",.7)
         if v2_risk:
-            risk["maximum_total_open_risk_pct"]=float(v2_risk.get("maximum_total_open_risk_pct",1))
+            risk["maximum_total_open_risk_pct"]=min(float(v2_risk.get("maximum_total_open_risk_pct",1)),float(v2_risk.get("maximum_correlated_risk_pct") or 100))
         if not 0 < float(risk["risk_per_trade_percent"]) <= 1.0:
             raise AutonomousExecutionError("risk_policy_invalid", "Risk per trade must be greater than zero and no more than 1%.")
         risk["risk_per_trade_percent"] = min(float(risk["risk_per_trade_percent"]), 1.0)
@@ -365,9 +369,13 @@ class AutonomousDemoService:
         risk["strategy_version"] = profile.get("strategy_version",risk.get("strategy_version","1"))
         risk["strategy_config"] = profile.get("strategy_config") or {}
         risk["execution_mode"] = mode.value
+        risk["news_filter_enabled"]=bool(profile.get("news_filter_enabled",True))
         risk["capital_allocation"]=(profile.get("profile_v2") or {}).get("capital_allocation") or {
             "mode":"full_account","risk_base":"account_equity","compounding_mode":"disabled",
             "maximum_margin_utilization_pct":70.0,"allow_shared_capital":False}
+        strategy_margin=v2_risk.get("maximum_margin_utilization_pct")
+        if strategy_margin is not None:
+            risk["capital_allocation"]={**risk["capital_allocation"],"maximum_margin_utilization_pct":min(float(strategy_margin),float(risk["capital_allocation"].get("maximum_margin_utilization_pct",70)))}
         connection = BrokerConnection(connection_id=resolved.connection_id, connection_ref=resolved.connection_ref,
             base_url=resolved.base_url, username=resolved.username, password=resolved.password,
             server=resolved.server, account_id=resolved.account_id, account_number=resolved.account_number,
@@ -379,11 +387,18 @@ class AutonomousDemoService:
         try:
             discovered = await client.get_accounts()
             profile_v2=profile.get("profile_v2") or {}
-            if (profile_v2.get("trading_policy") or {}).get("mode")=="adaptive" and hasattr(client,"get_symbols"):
+            if profile_v2 and hasattr(client,"get_symbols"):
                 symbols_payload=await client.get_symbols()
                 catalog=[item for row in client._instrument_rows(symbols_payload) if (item:=normalize_instrument(row)) is not None]
-                selected=resolve_universe(catalog,profile_v2.get("market_universe") or {"mode":"all_available"})
-                selected=[item for item in selected if market_is_open(item,utcnow())]
+                universe=profile_v2.get("market_universe") or {"mode":"all_available"}
+                selected=resolve_universe(catalog,universe)
+                if universe.get("mode")=="custom" and not selected:
+                    wanted={str(value).replace("/","").upper() for value in universe.get("included_instrument_ids",[])}
+                    excluded={str(value).replace("/","").upper() for value in universe.get("excluded_instrument_ids",[])}
+                    selected=[item for item in catalog if item["broker_symbol"].replace("/","").upper() in wanted
+                        and item["instrument_id"] not in excluded and item["broker_symbol"].replace("/","").upper() not in excluded]
+                selected=[item for item in selected if item["broker_symbol"] in ALLOWED_PAIRS and market_is_open(item,utcnow())]
+                if not selected:raise AutonomousExecutionError("no_supported_market_selected","No supported execution market is currently available in this strategy.")
                 screening=screen_candidates(selected,maximum_screened=settings.autonomous_maximum_instruments_screened,
                     maximum_deeply_analyzed=settings.autonomous_maximum_instruments_deeply_analyzed)
                 deep=set(screening["deep_candidates"])
@@ -552,8 +567,9 @@ class AutonomousDemoService:
             await fred.aclose()
         return providers, blackouts, context
 
-    async def snapshot(self, user_sub: str, profile_ref: str, symbol: str | None = None, *, autonomous: bool=False, include_history: bool=False) -> dict[str, Any]:
-        context = await self.context(user_sub, profile_ref, allow_autonomous=autonomous)
+    async def snapshot(self, user_sub: str, profile_ref: str, symbol: str | None = None, *, autonomous: bool=False, include_history: bool=False, analysis_only:bool=False) -> dict[str, Any]:
+        if analysis_only and autonomous:raise AutonomousExecutionError("invalid_snapshot_mode","Analysis-only snapshots cannot authorize autonomous execution.")
+        context = await self.context(user_sub, profile_ref, require_mode=not analysis_only,allow_autonomous=autonomous)
         if autonomous:
             controls=self.execution.get_autonomous_controls(user_sub)
             if controls["global_autonomous_kill_switch"]:
@@ -857,6 +873,36 @@ class AutonomousDemoService:
                     raise
         raise AutonomousExecutionError("position_size_unverifiable", "A fresh currency-conversion quote is unavailable.", status="rejected")
 
+    @staticmethod
+    def _risk_percent(context,confidence,autonomous):
+        policy=context.risk.get("risk_policy") or {}
+        base=float(context.risk["risk_per_trade_percent"])
+        if not autonomous or policy.get("mode")!="adaptive":return base
+        minimum_confidence=float(context.risk.get("minimum_confidence") or .7)
+        if confidence is None or not math.isfinite(confidence) or not minimum_confidence<=confidence<=1:
+            raise AutonomousExecutionError("adaptive_confidence_required","Adaptive sizing requires a validated strategy confidence.",status="rejected")
+        factor=max(.5,min(1.5,confidence/minimum_confidence))
+        return min(1,float(policy.get("maximum_risk_pct",base)),max(float(policy.get("minimum_risk_pct",base)),float(policy.get("base_risk_pct",base))*factor))
+
+    @staticmethod
+    def _check_gross_exposure(allocation,capital,positions,new_notional,account_currency):
+        multiple=allocation.get("maximum_gross_exposure_multiple")
+        if multiple is None:return
+        total=float(new_notional)
+        for row in positions:
+            quantity=_find_value(row,("qty","quantity","size"))
+            if quantity is not None and float(quantity)==0:continue
+            value=_find_value(row,("notionalAccountCurrency",))
+            if value is None and str(_find_value(row,("accountCurrency","currency")) or "").upper()==account_currency:
+                value=_find_value(row,("grossExposure","notional","notionalValue","marketValue"))
+            try:amount=abs(float(value))
+            except (ValueError,TypeError):
+                raise AutonomousExecutionError("gross_exposure_unverifiable","The broker did not provide comparable account-currency position exposure.",status="rejected") from None
+            if not math.isfinite(amount):raise AutonomousExecutionError("gross_exposure_unverifiable","Current position exposure is unavailable.",status="rejected")
+            total+=amount
+        if not math.isfinite(total) or total>float(capital)*float(multiple):
+            raise AutonomousExecutionError("gross_exposure_limit","The configured gross-exposure limit would be exceeded.",status="rejected")
+
     async def review(self, user_sub: str, profile_ref: str, proposal: AutonomousOrderProposal, *, autonomous: bool=False, requested_lots: float | None=None) -> dict[str, Any]:
         if autonomous and requested_lots is not None:
             raise AutonomousExecutionError("invalid_quantity", "Autonomous sizing is controlled by the server.", status="rejected")
@@ -938,9 +984,10 @@ class AutonomousDemoService:
             metadata.quote_currency, account_currency,
             normalized.get("market", {}).get("pairs", {}),
         )
+        effective_risk=self._risk_percent(context,proposal.confidence,autonomous)
         size = calculate_broker_position_size(
             balance=float(normalized["account"]["balance"]), available_funds=float(normalized["account"]["available_funds"]),
-            risk_percent=float(context.risk["risk_per_trade_percent"]), entry=proposal.entry,
+            risk_percent=effective_risk, entry=proposal.entry,
             stop_loss=proposal.stop_loss, metadata=metadata, quote_to_account_rate=quote_to_account,
             spread=spread,
             commission_per_lot=metadata.commission_per_lot,
@@ -948,6 +995,9 @@ class AutonomousDemoService:
             remaining_allocation_margin=float(normalized["risk_state"]["capital_state"]["remaining_margin_budget"]),
             requested_lots=requested_lots,
         )
+        self._check_gross_exposure(context.risk["capital_allocation"],normalized["risk_state"]["capital_state"].get("authorized_capital",0),
+            normalized.get("positions",[]),size["quantity"]*proposal.entry*quote_to_account,account_currency)
+        if autonomous:metadata=replace(metadata,decision_confidence=proposal.confidence,authorized_risk_percent=effective_risk)
         preview_id, now = f"preview_{uuid4().hex}", utcnow()
         estimated_reward = size["lot_size"] * float(calculation["reward_distance"]) * metadata.contract_size * quote_to_account
         record = {
@@ -980,6 +1030,7 @@ class AutonomousDemoService:
     def _require_submission_permission(self,user_sub:str,profile_ref:str,*,autonomous:bool=False)->None:
         profile=self.brokers.get_profile(user_sub,profile_ref)
         if not profile:raise AutonomousExecutionError("profile_not_found","The strategy is unavailable.",status="rejected")
+        if not profile.get("enabled"):raise AutonomousExecutionError("profile_disabled","The strategy is disabled.",status="rejected")
         allowed={"demo_autonomous"} if autonomous else {"demo_manual","demo_autonomous"}
         if profile.get("execution_mode") not in allowed:
             raise AutonomousExecutionError("execution_permission_required","This strategy does not permit the requested demo submission.",status="rejected")
@@ -1086,12 +1137,13 @@ class AutonomousDemoService:
                 if error := pending_entry_error(preview["order_type"], "buy" if preview["side"] == "long" else "sell", preview["entry"], bid, ask):
                     raise AutonomousExecutionError("invalid_pending_entry", error, status="rejected")
                 metadata = InstrumentMetadata(**preview["broker_metadata"])
+                effective_risk=self._risk_percent(context,metadata.decision_confidence,autonomous_origin)
                 if (ask - bid) / metadata.pip_size > settings.autonomous_max_spread_pips:
                     raise AutonomousExecutionError("spread_too_wide", "The current spread exceeds the configured maximum.", status="rejected")
                 account_currency = (context.currency or account.account.currency or "").upper()
                 conversion = await self._fresh_conversion_rate(client, metadata.quote_currency, account_currency)
                 current_risk_per_lot = ((abs((current if preview["order_type"] == "market" else preview["entry"]) - preview["stop_loss"]) + (ask - bid)) * metadata.contract_size * conversion + metadata.commission_per_lot)
-                if current_risk_per_lot * preview["lot_size"] > fresh_risk_base * context.risk["risk_per_trade_percent"] / 100:
+                if current_risk_per_lot * preview["lot_size"] > fresh_risk_base * effective_risk / 100:
                     raise AutonomousExecutionError("risk_limit_changed", "Fresh market state would exceed the account risk limit.", status="rejected")
                 if preview["order_type"] == "market" and abs(current - preview["entry"]) / preview["entry"] * 100 > settings.autonomous_price_tolerance_percent:
                     raise AutonomousExecutionError("price_moved", "The current price moved beyond the configured tolerance.", status="rejected")
@@ -1108,6 +1160,8 @@ class AutonomousDemoService:
                 metrics["margin_used"]=max(metrics["margin_used"],ownership["estimated_margin_used"])
                 fresh_capital=build_capital_state(account_equity=account.projected_balance,
                     allocation=allocation,risk_policy={"maximum_total_open_risk_pct":context.risk.get("maximum_total_open_risk_pct",1)},**metrics)
+                self._check_gross_exposure(allocation,fresh_capital["authorized_capital"],mapped_positions,
+                    float(preview["quantity"])*(current if preview["order_type"]=="market" else float(preview["entry"]))*conversion,account_currency)
                 if float(preview.get("estimated_margin") or 0)>fresh_capital["remaining_margin_budget"]:
                     raise AutonomousExecutionError("capital_margin_limit","The profile allocation margin budget was reached.",status="rejected")
                 if current_risk_per_lot * preview["lot_size"]>fresh_capital["remaining_risk_budget"]:
@@ -1665,6 +1719,17 @@ class AutonomousDemoService:
     async def execution_result(self,user_sub:str,execution_id:str)->dict[str,Any]:
         action=self.execution.get_action_execution(user_sub,execution_id)
         if action:
+            if action.get("action_type")=="update_stop":
+                if action.get("state") in {"claimed","unknown","dispatching"}:
+                    preview=self.execution.get_action_preview(action["preview_id"])
+                    if preview and preview.get("user_sub")==user_sub:
+                        from app.services.autonomous.position_management import PositionManagementService
+                        from app.storage.position_management import PositionManagementRepository
+                        manager=PositionManagementService(brokers=self.brokers,execution=self.execution,
+                            states=PositionManagementRepository(self.execution.db_path),demo=self)
+                        await manager.manage_profile(user_sub,preview["profile_ref"],read_only=True)
+                        action=self.execution.get_action_execution(user_sub,execution_id) or action
+                return self._action_result(action)
             if action["state"] == "unknown":
                 preview=self.execution.get_action_preview(action["preview_id"])
                 if preview and preview["user_sub"] == user_sub:

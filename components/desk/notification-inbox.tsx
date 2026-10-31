@@ -18,6 +18,7 @@ export function notificationCategory(event:ActivityEvent){
   if(type==="demo_order_submitted"&&/verified|submitted/.test(outcome))return "demo_trade_submitted"
   if(type==="strategy_evaluated"&&outcome==="blocked")return "strategy_blocked"
   if(type.includes("connection")&&/disabled|removed|disconnect/.test(type))return "trading_connection_disconnected"
+  if(type==="protection_update_unconfirmed")return "automation_interruption"
   if(type==="strategy_evaluated"&&outcome==="error")return "automation_interruption"
   return null
 }

@@ -77,3 +77,10 @@ def test_overnight_interval_retains_start_day():
     rule={"type":"recurring_interval","start_time":"22:00","end_time":"02:00","interval_minutes":120,"days":["monday"]}
     instant=next_recurrence_utc(datetime(2026,7,6,23,tzinfo=timezone.utc),"UTC",rule)
     assert instant.isoformat()=="2026-07-07T00:00:00+00:00"
+
+
+def test_incomplete_trailing_settings_return_validation_details(workspace):
+    _,profile,client=workspace
+    response=client.patch(f"/api/execution-profiles/{profile['public_id']}",json={"exit_policy":{"trailing_stop":{"enabled":True}}})
+    assert response.status_code==422,response.text
+    assert response.json()['detail']['fields']

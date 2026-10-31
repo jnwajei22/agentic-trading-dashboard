@@ -59,7 +59,7 @@ def test_schema_and_runtime_role():
     assert check_database() == {'backend':'postgres','ready':True}
     with connect() as db:
         assert db.execute('SELECT current_user').fetchone()[0] == 'desk_runtime'
-        assert db.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='desk'").fetchone()[0] == 32
+        assert db.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='desk'").fetchone()[0] == 33
         with pytest.raises(DatabaseUnavailable): db.execute('CREATE TABLE forbidden(id int)')
 
 
@@ -188,8 +188,10 @@ def test_named_execution_records_round_trip_through_runtime_role():
     assert repo.get_preview(preview_id)['lot_size']==.01
     submission_id='submission-'+token
     assert repo.claim_submission(submission_id,preview_id,'key-'+token,'fingerprint')[0]
-    repo.update_submission(submission_id,submission_state='verified',reconciliation_json={'verified':True},execution_id=run_id)
+    repo.update_submission(submission_id,submission_state='verified',reconciliation_json={'verified':True},execution_id=run_id,broker_position_id='position-'+token)
     assert repo.get_submission(preview_id=preview_id)['reconciliation']['verified'] is True
+    assert repo.managed_positions(owner,'profile')[0]['broker_position_id']=='position-'+token
+    assert repo.managed_positions('outsider','profile')==[]
     repo.insert_run({'id':run_id,**routing,'snapshot_id':snapshot_id,'preview_id':preview_id,'strategy_name':'strategy',
         'strategy_version':'1','decision':'submit','result_status':'unknown','result_json':{'verified':False},
         'started_at':stamp,'completed_at':stamp,'created_at':stamp})
@@ -240,3 +242,37 @@ def test_operations_journal_is_owner_scoped_and_rolls_back_with_mutation():
             record_event(db,owner,'schedule_created','Must roll back')
             raise RuntimeError('transaction failed')
     assert len(WorkspaceEventRepository().list(owner))==1
+
+
+def _management_preview(owner):
+    now=datetime.now(timezone.utc)
+    return {'id':'manage-'+uuid4().hex,'user_sub':owner,'action_type':'update_stop','profile_ref':'profile',
+        'account_record_id':'account-ref','connection_ref':'connection-ref','connection_id':'connection',
+        'account_id':'broker-account','acc_num':'1','account_alias':'demo','environment':'demo','server':'Test',
+        'base_url':'https://demo.example','demo_classification':'demo','target_id':'123',
+        'target_json':{'requested_stop':1.1},'status':'approved','created_at':now.isoformat(),
+        'expires_at':(now+timedelta(minutes=2)).isoformat()}
+
+
+def test_protection_claims_are_durable_owner_scoped_and_unknown_writes_never_expire():
+    from app.storage.position_management import PositionManagementRepository
+    state=PositionManagementRepository();owner=settings.workspace_owner_sub
+    first=state.claim(_management_preview(owner),1.1);assert first
+    assert state.claim(_management_preview(owner),1.11) is None
+    assert state.state('outsider','profile','123') is None
+    state.finish(first,outcome='unknown',error='timeout')
+    assert PositionManagementRepository().claim(_management_preview(owner),1.12) is None
+    state.finish(first,outcome='verified',reconciliation={'verified':True})
+    second=state.claim(_management_preview(owner),1.12);assert second
+    assert state.finish(first,outcome='verified') is False
+    assert state.state(owner,'profile','123')['token']==second['token']
+
+
+@pytest.mark.skipif(os.environ.get('DESK_TEST_NATIVE_POSTGRES') != '1',reason='Native independent connections required')
+def test_concurrent_protection_managers_claim_one_broker_write():
+    from app.storage.position_management import PositionManagementRepository
+    from concurrent.futures import ThreadPoolExecutor
+    owner=settings.workspace_owner_sub
+    def claim(_):return PositionManagementRepository().claim(_management_preview(owner),1.1)
+    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(claim,range(2)))
+    assert sum(result is not None for result in results)==1

@@ -68,6 +68,7 @@ class BrokerAccountResolver:
         account_ref: str | None = None,
         profile: str | None = None,
         require_available: bool = True,
+        allow_disabled_profile: bool = False,
     ) -> BrokerAccountContext:
         selectors = sum(value is not None for value in (account_alias, account_ref, profile))
         if selectors > 1:
@@ -80,7 +81,7 @@ class BrokerAccountResolver:
         if row is None:
             code = "account_alias_not_found" if account_alias or account_ref else "profile_not_found" if profile else "default_account_required"
             raise AccountResolutionError(code, "No owned TradeLocker account matches that selector.")
-        if profile and (not row["profile_enabled"] or row["profile_execution_mode"] == "disabled"):
+        if profile and not allow_disabled_profile and (not row["profile_enabled"] or row["profile_execution_mode"] == "disabled"):
             raise AccountResolutionError("profile_disabled", "The selected execution profile is disabled.")
         if row["connection_status"] != "active" or not row["locally_enabled"]:
             raise AccountResolutionError("account_disabled", "The selected TradeLocker account is disabled.")

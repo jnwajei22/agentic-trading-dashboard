@@ -8,6 +8,7 @@ from app.config.settings import settings
 from app.jobs.autonomous_scheduler import AutonomousSchedulerWorker
 from app.services.autonomous.runner import AutonomousDecisionRunner
 from app.storage.database import check_database
+from app.services.autonomous.position_management import PositionManagementService
 
 
 class ShadowRunner(AutonomousDecisionRunner):
@@ -24,11 +25,15 @@ def preflight():
     if not settings.broker_secret_key and settings.broker_secret_keys_json == "{}":
         raise RuntimeError("Configure the same broker encryption key used by the dashboard engine.")
     check_database()
+    from app.storage.database import connect
+    with connect() as db:db.execute("SELECT 1 FROM position_management_state LIMIT 0")
 
 
 async def run(execute_demo=False):
     preflight()
-    worker=AutonomousSchedulerWorker(runner_factory=AutonomousDecisionRunner if execute_demo else ShadowRunner)
+    worker=AutonomousSchedulerWorker(runner_factory=AutonomousDecisionRunner if execute_demo else ShadowRunner,
+        position_management=PositionManagementService().run_once if execute_demo else None,
+        execution_mode="demo_execution" if execute_demo else "shadow")
     logging.getLogger(__name__).info("worker_started mode=%s", "demo_execution" if execute_demo else "shadow")
     loop=asyncio.get_running_loop()
     for event in (signal.SIGINT, signal.SIGTERM):

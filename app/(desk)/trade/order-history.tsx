@@ -1,4 +1,5 @@
 "use client"
+import {WorkspaceTime} from "@/components/desk/workspace-time"
 
 import { Fragment, useState } from "react"
 import { ChevronDown, Search } from "lucide-react"
@@ -48,7 +49,7 @@ export function OrderHistory({ rows }: { rows: BrokerRow[] }) {
               <td className="px-3 py-3 tabular-nums">{activityNumber(row.quantity, 4)} <span className="text-xs text-muted-foreground">lots</span></td>
               <td className="px-3 py-3 tabular-nums">{activityNumber(row.entry, 8)}</td>
               <td className="px-3 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium ${tones[statusGroup(row.status)]}`}>{activityLabel(row.status)}</span></td>
-              <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{time ? <time dateTime={new Date(time).toISOString()} title={new Date(time).toLocaleString()}><span className="block">{new Date(time).toLocaleDateString(undefined, {month:"short", day:"numeric", year:"numeric"})}</span><span className="mt-0.5 block tabular-nums">{new Date(time).toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"})}</span></time> : "Unavailable"}</td>
+              <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{time ? <span><span className="block">{<WorkspaceTime value={new Date(time).toISOString()} kind="date"/>}</span><span className="mt-0.5 block tabular-nums">{<WorkspaceTime value={new Date(time).toISOString()} kind="time"/>}</span></span> : "Unavailable"}</td>
             </tr>
             {open && <tr><td colSpan={5} className="bg-muted/20 px-6 py-4"><dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs md:grid-cols-4">
               {Object.entries({"Broker order ID":row.id, "Stop loss":activityNumber(row.stop_loss,8), "Take profit":activityNumber(row.take_profit,8), "Broker-reported P&L":activityNumber(row.pnl,2)}).map(([name, value]) => <div key={name}><dt className="text-muted-foreground">{name}</dt><dd className="mt-1 break-all font-medium tabular-nums">{value}</dd></div>)}
