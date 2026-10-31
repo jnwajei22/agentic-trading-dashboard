@@ -46,3 +46,14 @@ test("executable quotes come only from the same-origin backend contract",()=>{
   assert.match(source,/trading\/order-calculations/);assert.match(source,/quote\.source/)
   assert.doesNotMatch(source,/TradingView|s\.tradingview|widgetembed/)
 })
+
+test("pending orders use requested entry for protection and validate all four entry directions",async()=>{
+  const {ticketEntry,pendingEntryMessage}=await import("../app/(desk)/trade/ticket-model")
+  assert.equal(ticketEntry("buy","market","1.3",quote),quote.ask)
+  assert.equal(ticketEntry("buy","limit","1.34",quote),1.34)
+  assert.equal(ticketEntry("buy","stop","",quote),null)
+  for(const [side,type,price] of [["buy","limit",1.34],["sell","limit",1.35],["buy","stop",1.35],["sell","stop",1.34]] as const){
+    assert.equal(pendingEntryMessage(side,type,price,quote),null)
+    assert.ok(pendingEntryMessage(side,type,price===1.34?1.35:1.34,quote))
+  }
+})

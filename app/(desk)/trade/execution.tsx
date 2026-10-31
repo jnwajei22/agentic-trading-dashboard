@@ -9,7 +9,7 @@ import type { BrokerRow } from "./activity-model"
 
 export type ApprovedOrder = {
   preview_id: string; expires_at: string; profile_ref: string; account_id: string;
-  pair: string; side: string; entry: number; stop_loss: number; take_profit: number;
+  pair: string; side: string; order_type: "market" | "limit" | "stop"; entry: number; stop_loss: number; take_profit: number;
   lot_size: number; estimated_risk: number; estimated_margin: number; reward_risk: number;
   risk_percent: number; estimated_reward: number; execution_quote: {bid:number;ask:number;timestamp:string};
 }
@@ -75,9 +75,9 @@ export function SubmissionControls({ account, preview, busy, canReview, review, 
     {preview ? <>
       <p className="text-sm font-medium">Review this demo order</p>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-        {Object.entries({ Order: `${preview.side === "long" ? "Buy" : "Sell"} ${preview.lot_size} lots · ${preview.pair}`, Entry: preview.entry, "Stop loss": preview.stop_loss, "Take profit": preview.take_profit, "Estimated risk": preview.estimated_risk.toFixed(2), "Estimated margin": preview.estimated_margin.toFixed(2) }).map(([name, value]) => <div key={name}><dt className="text-muted-foreground">{name}</dt><dd className="mt-1 font-medium">{value}</dd></div>)}
+        {Object.entries({ Order: `${preview.side === "long" ? "Buy" : "Sell"} ${preview.lot_size} lots · ${preview.pair} · ${preview.order_type}`, Entry: preview.entry, "Stop loss": preview.stop_loss, "Take profit": preview.take_profit, "Estimated risk": preview.estimated_risk.toFixed(2), "Estimated margin": preview.estimated_margin.toFixed(2) }).map(([name, value]) => <div key={name}><dt className="text-muted-foreground">{name}</dt><dd className="mt-1 font-medium">{value}</dd></div>)}
       </dl>
-      <p className="text-xs text-muted-foreground">{expired ? "Preview expired. Edit and review again." : `Valid for ${Math.max(0, Math.ceil((Date.parse(preview.expires_at) - now) / 1000))} seconds. Final fill may differ.`}</p>
+      <p className="text-xs text-muted-foreground">{expired ? "Preview expired. Edit and review again." : `Valid for ${Math.max(0, Math.ceil((Date.parse(preview.expires_at) - now) / 1000))} seconds. ${preview.order_type === "market" ? "Final fill may differ." : "Pending order stays open until filled or cancelled."}`}</p>
       <Button disabled={sending || expired} onClick={() => void submit()} className="w-full rounded-full">{sending ? "Submitting…" : "Confirm & submit demo order"}</Button>
       <Button disabled={sending} onClick={edit} variant="ghost" className="w-full rounded-full">Edit order</Button>
     </> : <><Button disabled={busy || !canReview} onClick={review} className="w-full rounded-full">{busy ? "Validating…" : "Review demo order"}</Button><p className="text-center text-xs leading-relaxed text-muted-foreground">Review creates a preview. Only your confirmation sends an order.</p></>}

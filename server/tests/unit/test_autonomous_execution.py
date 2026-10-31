@@ -517,7 +517,7 @@ async def test_manual_preview_warns_on_finnhub_and_exposes_broker_calculation(tm
     service, profile, _, clients = snapshot_service(tmp_path, monkeypatch)
     snapshot = await service.snapshot("user", profile, "EURUSD")
     proposal = AutonomousOrderProposal(
-        snapshot_id=snapshot["snapshot_id"], pair="EURUSD", side="long", order_type="limit",
+        snapshot_id=snapshot["snapshot_id"], pair="EURUSD", side="long", order_type="market",
         entry=1.14300, stop_loss=1.14100, take_profit=1.14700,
     )
     preview = await service.review("user", profile, proposal)
@@ -535,7 +535,7 @@ async def test_nominal_one_point_five_is_blocked_by_disclosed_spread_adjustment(
     service, profile, _, _ = snapshot_service(tmp_path, monkeypatch)
     snapshot = await service.snapshot("user", profile, "EURUSD")
     proposal = AutonomousOrderProposal(
-        snapshot_id=snapshot["snapshot_id"], pair="EURUSD", side="long", order_type="limit",
+        snapshot_id=snapshot["snapshot_id"], pair="EURUSD", side="long", order_type="market",
         entry=1.14300, stop_loss=1.14100, take_profit=1.14600,
     )
     with pytest.raises(AutonomousExecutionError) as error:
@@ -637,7 +637,7 @@ class SubmissionClient:
 
     async def get_orders_history(self): return {"d": []}
     async def get_open_positions(self): return {"d": []}
-    async def get_quote(self, symbol): return {"d": {"bp": 1.1429, "ap": 1.143}}
+    async def get_quote(self, symbol): return {"d": {"bp": 1.1429, "ap": 1.1431}}
 
     async def place_order(self, payload):
         self.place_order_calls += 1
@@ -784,7 +784,7 @@ def submission_service(tmp_path, monkeypatch, client, *, origin="autonomous"):
         risk={"strategy_name": "strategy", "strategy_version": "1", "strategy_config": {},
               "maximum_open_positions": 1, "maximum_pending_orders": 1,
               "maximum_new_entries_per_day": 2, "daily_loss_limit_percent": 3,
-              "drawdown_cutoff_percent": 10, "risk_per_trade_percent": 3},
+              "drawdown_cutoff_percent": 10, "risk_per_trade_percent": 3, "maximum_total_open_risk_pct": 3},
         connection=connection, profile_ref="profile-a", account_record_id="account-record-a",
         account_alias="herofx-demo-1", connection_ref="connection-ref-a",
         connection_label="HeroFX Demo", demo_classification="demo",
@@ -987,3 +987,49 @@ async def test_closed_position_releases_reserved_estimates_but_retains_ownership
     assert flat_state["estimated_open_risk"] == flat_state["estimated_margin_used"] == 0
     assert flat_state["position_ids"] == {"closed-position"}
     assert not repository.profile_broker_ids("other-user", "profile-a", live_position_ids={"closed-position"})["position_ids"]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('order_type,entry', [('limit',1.14),('stop',1.144)])
+async def test_pending_submission_payload_and_replay_preserve_exact_reviewed_terms(tmp_path,monkeypatch,order_type,entry):
+    class PendingClient(SubmissionClient):
+        async def place_order(self,payload):
+            self.payload=payload.copy()
+            return await super().place_order(payload)
+        @staticmethod
+        def config():
+            result=SubmissionClient.config()
+            for key in ('ordersConfig','ordersHistoryConfig'):
+                result['d'][key]['columns'].append({'id':'stopPrice'})
+            return result
+        def order_row(self):
+            row=super().order_row()
+            row[2]=.5;row[4]=order_type;row[6]=0 if order_type=='stop' else entry
+            return row+[entry if order_type=='stop' else 0]
+    client=PendingClient(visible_after_order_read=2)
+    service,repository,preview_id,_=submission_service(tmp_path,monkeypatch,client,origin='manual')
+    with repository._connect() as db:
+        db.execute('UPDATE autonomous_order_previews SET order_type=?,entry=?,stop_loss=?,take_profit=?,lot_size=.5,quantity=50000 WHERE id=?',
+            (order_type,entry,1.141 if order_type=='stop' else 1.138,1.147,preview_id))
+    # Echo immutable protective prices in the broker's positional confirmation.
+    original=client.order_row
+    def row():
+        result=original();result[7]=1.141 if order_type=='stop' else 1.138;return result
+    client.order_row=row
+    first=await service.submit('user',preview_id,'pending:exact-key')
+    replay=await service.submit('user',preview_id,'pending:exact-key')
+    assert first['status']==replay['status']=='submitted'
+    assert client.payload['type']==order_type and client.payload['validity']=='GTC'
+    assert client.payload['qty']==.5 and client.place_order_calls==1
+    if order_type=='stop':assert client.payload['stopPrice']==entry and client.payload['price']==0
+    else:assert client.payload['price']==entry and 'stopPrice' not in client.payload
+
+
+@pytest.mark.asyncio
+async def test_pending_entry_is_revalidated_against_current_market_before_dispatch(tmp_path,monkeypatch):
+    client=SubmissionClient()
+    service,repository,preview_id,_=submission_service(tmp_path,monkeypatch,client,origin='manual')
+    async def quote(symbol):return {'d':{'bp':1.1428,'ap':1.1429}}
+    client.get_quote=quote
+    with pytest.raises(AutonomousExecutionError) as error:
+        await service.submit('user',preview_id,'pending:moved-key')
+    assert error.value.code=='invalid_pending_entry' and client.place_order_calls==0

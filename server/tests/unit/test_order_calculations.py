@@ -71,3 +71,19 @@ def test_invalid_side_protection_and_quantity_are_blocking():
     assert "below the entry price for a Buy order" in " ".join(wrong["blocking_reasons"])
     step=calculation(quantity=.505)
     assert step["entry_price"] is None and "provider minimum" in step["blocking_reasons"][0]
+
+@pytest.mark.parametrize('side,order_type,entry', [('buy','limit',1.34),('sell','limit',1.35),('buy','stop',1.35),('sell','stop',1.34)])
+def test_pending_orders_calculate_exits_from_requested_entry(side, order_type, entry):
+    result=calculation(side=side,order_type=order_type,entry_price=entry,
+        stop_loss={'mode':'pips','value':20},take_profit={'mode':'reward_multiple','value':2})
+    assert result['entry_price']==entry and result['entry_side']=='Requested'
+    assert result['stop_loss']['distance_pips']==20
+    assert result['take_profit']['distance_pips']==40
+    assert result['stop_loss']['estimated_loss']==100
+    assert not result['blocking_reasons']
+
+
+@pytest.mark.parametrize('side,order_type,entry', [('buy','limit',1.35),('sell','limit',1.34),('buy','stop',1.34),('sell','stop',1.35),('buy','limit',None)])
+def test_invalid_pending_direction_or_missing_entry_never_returns_executable_calculation(side,order_type,entry):
+    result=calculation(side=side,order_type=order_type,entry_price=entry)
+    assert result['entry_price'] is None and result['blocking_reasons']

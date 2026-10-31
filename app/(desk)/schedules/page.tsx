@@ -1,5 +1,5 @@
 import { workspaceBackendClient } from "@/lib/afd/backend"
-import type { ProfileSummary, Schedule } from "@/lib/afd/contracts"
+import type { ProfileSummary, Schedule, WorkerHealth } from "@/lib/afd/contracts"
 import { ScheduleManager } from "./schedule-manager"
 export const metadata={title:"Schedules"}
-export default async function SchedulesPage(){let schedules:Schedule[]=[];let profiles:ProfileSummary[]=[];try{const request=await workspaceBackendClient();const [s,p]=await Promise.all([request<{schedules:Schedule[]}>("/api/autonomous-schedules"),request<{profiles:ProfileSummary[]}>("/api/execution-profiles")]);schedules=s.schedules??[];profiles=p.profiles??[]}catch{}return <ScheduleManager initialSchedules={schedules} profiles={profiles}/>}
+export default async function SchedulesPage(){let schedules:Schedule[]=[];let profiles:ProfileSummary[]=[];let worker:WorkerHealth={status:"unavailable",workers:[]};let degraded=false;try{const request=await workspaceBackendClient();const [s,p,w]=await Promise.allSettled([request<{schedules:Schedule[]}>("/api/autonomous-schedules"),request<{profiles:ProfileSummary[]}>("/api/execution-profiles"),request<WorkerHealth>("/api/autonomous-worker-health")]);if(s.status==="fulfilled")schedules=s.value.schedules??[];if(p.status==="fulfilled")profiles=p.value.profiles??[];if(w.status==="fulfilled")worker=w.value;degraded=[s,p,w].some(result=>result.status==="rejected")}catch{degraded=true}return <ScheduleManager initialSchedules={schedules} profiles={profiles} worker={worker} degraded={degraded}/>}

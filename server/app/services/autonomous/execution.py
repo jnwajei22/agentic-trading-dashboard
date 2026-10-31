@@ -15,6 +15,7 @@ from uuid import uuid4
 from app.brokers.tradelocker.client import TradeLockerClient, TradeLockerError
 from app.brokers.tradelocker.mapping import TradeLockerMappingError, map_configured_rows
 from app.config.settings import settings
+from app.services.trading.order_calculations import pending_entry_error
 from app.models.autonomous import AutonomousOrderProposal, ExecutionMode
 from app.services.market_data.history import normalize_timeframe
 from app.services.providers.errors import ProviderError
@@ -235,7 +236,7 @@ def calculate_reward_risk(
         "rounded_take_profit": float(rounded_target), "quote_bid": float(rounded_bid),
         "quote_ask": float(rounded_ask), "tick_size": float(tick),
         "price_precision": metadata.price_precision,
-        "entry_price_basis": "requested_limit" if order_type == "limit" else "ask" if side == "long" else "bid",
+        "entry_price_basis": f"requested_{order_type}" if order_type in {"limit", "stop"} else "ask" if side == "long" else "bid",
         "gross_risk_distance": float(gross_risk), "gross_reward_distance": float(gross_reward),
         "spread_adjustment": float(spread), "risk_distance": float(adjusted_risk),
         "reward_distance": float(adjusted_reward), "reward_risk": float(reward_risk),
@@ -907,12 +908,18 @@ class AutonomousDemoService:
             await client.aclose()
         metadata = parse_instrument_metadata(instrument_payload, pair)
         bid, ask = self._quote(market["quote"])
+        if error := pending_entry_error(proposal.order_type, "buy" if proposal.side == "long" else "sell", proposal.entry, bid, ask):
+            raise AutonomousExecutionError("invalid_pending_entry", error, status="rejected")
         calculation = calculate_reward_risk(
             entry=proposal.entry, stop_loss=proposal.stop_loss, take_profit=proposal.take_profit,
             bid=bid, ask=ask, metadata=metadata,
             minimum_reward_risk=context.risk["minimum_reward_risk"], side=proposal.side,
             order_type=proposal.order_type,
         )
+        if any(abs(value - calculation[key]) > 1e-12 for value, key in (
+                (proposal.entry, "rounded_entry"), (proposal.stop_loss, "rounded_stop_loss"),
+                (proposal.take_profit, "rounded_take_profit"))):
+            raise AutonomousExecutionError("invalid_price_increment", "Entry, stop loss, and take profit must match the broker price increment.", status="rejected")
         if Decimal(str(calculation["reward_risk"])) < Decimal(str(context.risk["minimum_reward_risk"])):
             violations.append("reward_risk_too_low")
         if Decimal(str(calculation["gross_risk_distance"])) < Decimal(str(metadata.minimum_stop_distance)):
@@ -1068,6 +1075,8 @@ class AutonomousDemoService:
                 quote = await client.get_quote(preview["pair"])
                 bid, ask = self._quote(quote)
                 current = ask if preview["side"] == "long" else bid
+                if error := pending_entry_error(preview["order_type"], "buy" if preview["side"] == "long" else "sell", preview["entry"], bid, ask):
+                    raise AutonomousExecutionError("invalid_pending_entry", error, status="rejected")
                 metadata = InstrumentMetadata(**preview["broker_metadata"])
                 if (ask - bid) / metadata.pip_size > settings.autonomous_max_spread_pips:
                     raise AutonomousExecutionError("spread_too_wide", "The current spread exceeds the configured maximum.", status="rejected")
@@ -1076,7 +1085,7 @@ class AutonomousDemoService:
                 current_risk_per_lot = ((abs((current if preview["order_type"] == "market" else preview["entry"]) - preview["stop_loss"]) + (ask - bid)) * metadata.contract_size * conversion + metadata.commission_per_lot)
                 if current_risk_per_lot * preview["lot_size"] > fresh_risk_base * context.risk["risk_per_trade_percent"] / 100:
                     raise AutonomousExecutionError("risk_limit_changed", "Fresh market state would exceed the account risk limit.", status="rejected")
-                if abs(current - preview["entry"]) / preview["entry"] * 100 > settings.autonomous_price_tolerance_percent:
+                if preview["order_type"] == "market" and abs(current - preview["entry"]) / preview["entry"] * 100 > settings.autonomous_price_tolerance_percent:
                     raise AutonomousExecutionError("price_moved", "The current price moved beyond the configured tolerance.", status="rejected")
                 config = await client.get_config()
                 before_positions, before_orders = await client.get_open_positions(), await client.get_orders()
@@ -1093,7 +1102,7 @@ class AutonomousDemoService:
                     allocation=allocation,risk_policy={"maximum_total_open_risk_pct":context.risk.get("maximum_total_open_risk_pct",1)},**metrics)
                 if float(preview.get("estimated_margin") or 0)>fresh_capital["remaining_margin_budget"]:
                     raise AutonomousExecutionError("capital_margin_limit","The profile allocation margin budget was reached.",status="rejected")
-                if float(preview["estimated_risk"])>fresh_capital["remaining_risk_budget"]:
+                if current_risk_per_lot * preview["lot_size"]>fresh_capital["remaining_risk_budget"]:
                     raise AutonomousExecutionError("capital_risk_limit","The profile allocation risk budget was reached.",status="rejected")
                 open_positions = count_open_positions(mapped_positions)
                 if open_positions >= context.risk["maximum_open_positions"]:

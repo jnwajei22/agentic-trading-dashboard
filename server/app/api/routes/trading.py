@@ -13,7 +13,7 @@ from app.services.autonomous.execution import AutonomousDemoService, AutonomousE
 from app.services.autonomous.runner import AutonomousDecisionRunner
 from app.services.instruments import instrument_mapper, InstrumentMappingError
 from app.services.tradelocker.accounts import BrokerAccountResolver, AccountResolutionError
-from app.services.trading.order_calculations import _derived_price, _target_price, _round
+from app.services.trading.order_calculations import _derived_price, _target_price, _round, pending_entry_error
 from app.storage.brokers import BrokerRepository
 from app.storage.execution import ExecutionRepository
 
@@ -66,8 +66,8 @@ def execution_error(exc: AutonomousExecutionError):
 async def preview_ticket(payload: TicketPreview, claims=Depends(current_claims)):
     user = claims["sub"]
     ticket_profile(user, payload.profile_ref, payload.account_id)
-    if payload.order_type != "market" or payload.quantity.unit != "lot":
-        raise HTTPException(409, "This ticket currently supports market orders sized in lots.")
+    if payload.quantity.unit != "lot":
+        raise HTTPException(409, "This ticket supports forex orders sized in lots.")
     if payload.stop_loss is None or payload.take_profit is None:
         raise HTTPException(422, "A stop loss and take profit are required before review.")
     service = AutonomousDemoService()
@@ -78,7 +78,9 @@ async def preview_ticket(payload: TicketPreview, claims=Depends(current_claims))
         pair = normalize_pair(canonical.symbol)
         snapshot = await service.snapshot(user, payload.profile_ref, pair)
         bid, ask = service._quote(snapshot["market"]["pairs"][pair]["quote"])
-        entry = ask if payload.side == "buy" else bid
+        if error := pending_entry_error(payload.order_type, payload.side, payload.entry_price, bid, ask):
+            raise HTTPException(422, error)
+        entry = (ask if payload.side == "buy" else bid) if payload.order_type == "market" else payload.entry_price
         metadata = snapshot["market"]["pairs"][pair]["instrument_metadata"]
         pip_size, precision = metadata["pip_size"], metadata["price_precision"]
         stop = _derived_price(payload.stop_loss.model_dump(), entry, pip_size, payload.side, protective=True)
@@ -87,7 +89,7 @@ async def preview_ticket(payload: TicketPreview, claims=Depends(current_claims))
         if stop is None or target is None:
             raise HTTPException(422, "A valid stop loss and take profit are required.")
         proposal = AutonomousOrderProposal(snapshot_id=snapshot["snapshot_id"], pair=pair,
-            side="long" if payload.side == "buy" else "short", entry=entry,
+            side="long" if payload.side == "buy" else "short", order_type=payload.order_type, entry=entry,
             stop_loss=_round(stop, precision), take_profit=_round(target, precision),
             reason_codes=["manual_ticket"])
         approved = await service.review(user, payload.profile_ref, proposal, requested_lots=payload.quantity.value)
