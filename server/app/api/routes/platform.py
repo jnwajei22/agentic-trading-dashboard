@@ -79,6 +79,7 @@ class OrderCalculationRequest(BaseModel):
     instrument_id: str
     side: Literal["buy", "sell"]
     order_type: Literal["market", "limit", "stop"] = "market"
+    entry_price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     quantity: CalculationQuantity
     stop_loss: CalculationValue | None = None
     take_profit: CalculationValue | None = None
@@ -512,7 +513,7 @@ async def trading_order_calculations(payload:OrderCalculationRequest,claims:dict
     result=calculate_order(terms=terms,side=payload.side,quantity=payload.quantity.value,bid=bid,ask=ask,
         quote_timestamp=quote_timestamp,quote_source="TradeLocker",stop_loss=payload.stop_loss.model_dump() if payload.stop_loss else None,
         take_profit=payload.take_profit.model_dump() if payload.take_profit else None,account_currency=account_currency,
-        account_equity=equity,quote_to_account_rate=rate)
+        account_equity=equity,quote_to_account_rate=rate,order_type=payload.order_type,entry_price=payload.entry_price)
     result["instrument"]={**canonical.model_dump(),"quantity_unit":terms.quantity_unit}
     result["capabilities"]={"calculation":True,"preview":bool((owned.get("capabilities") or {}).get("order_preview")),
         "submission":bool((owned.get("capabilities") or {}).get("order_submission"))}
@@ -1146,14 +1147,21 @@ async def user_status(claims:dict=Depends(current_claims))->dict:
     configured_fred=bool(settings.fred_enabled and settings.fred_api_key)
     verified=[str(item.get("last_verified_at")) for item in accounts if item.get("last_verified_at")]
     return {"services":[
-        {"id":"application_api","label":"Application API","status":"available"},
-        {"id":"broker","label":"HeroFX","status":"connected" if any(item.get("enabled") for item in connections) else "needs_attention"},
-        {"id":"platform","label":"TradeLocker integration","status":"connected" if any(item.get("enabled") for item in connections) else "unavailable"},
-        {"id":"market_data","label":"Market data","status":"available" if configured_finnhub else "unavailable"},
-        {"id":"news","label":"News","status":"available" if configured_finnhub else "unavailable"},
-        {"id":"macro","label":"Macro data","status":"available" if configured_fred else "unavailable"},
-        {"id":"automation","label":"Automation","status":"available" if worker["status"]=="healthy" else "needs_attention"}],
+        {"id":"application_api","label":"Application API","status":"available","message":"The dashboard can reach its backend."},
+        {"id":"broker","label":"Trading connection","status":"configured" if any(item.get("enabled") for item in connections) else "needs_attention",
+         "message":"Saved connections are managed in Connections. Order review verifies the broker account again."},
+        {"id":"market_data","label":"Kraken prices and charts","status":"configured",
+         "message":"Public exchange feed. Markets shows the current stream state and received trades."},
+        {"id":"news","label":"Research news and calendar","status":"configured",
+         "message":"Official ECB, BLS, and BEA feeds are enabled. Availability and coverage can vary by source."},
+        {"id":"news_blackout","label":"Trading news validation","status":"configured" if configured_finnhub else "not_configured",
+         "message":"Separate from research headlines. Strategies that require news-blackout validation remain blocked without it."},
+        {"id":"macro","label":"FRED macro data","status":"configured" if configured_fred else "not_configured",
+         "message":"Optional macro provider. Strategies requiring it fail closed when it is unavailable."},
+        {"id":"automation","label":"Scheduled automation","status":"available" if worker["status"]=="healthy" else "not_running",
+         "message":"Worker heartbeat is current." if worker["status"]=="healthy" else "No healthy worker is connected. Strategies and schedules can still be configured."}],
         "last_successful_sync":max(verified) if verified else None,"generated_at":datetime.now(timezone.utc).isoformat()}
+
 
 
 @router.get("/autonomous-schedules")

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
+import math
 
 
 @dataclass(frozen=True)
@@ -48,16 +49,19 @@ def calculate_order(*, terms: InstrumentTerms, side: str, quantity: float, bid: 
                     ask: float | None, quote_timestamp: datetime | None, quote_source: str,
                     stop_loss: dict[str, Any] | None, take_profit: dict[str, Any] | None,
                     account_currency: str | None, account_equity: float | None,
-                    quote_to_account_rate: float | None) -> dict[str, Any]:
+                    quote_to_account_rate: float | None, order_type: str = "market",
+                    entry_price: float | None = None) -> dict[str, Any]:
     side = side.lower()
     blocking: list[str] = []
     if side not in {"buy", "sell"}: blocking.append("Select Buy or Sell.")
     if bid is None or ask is None or bid <= 0 or ask <= 0:
         blocking.append("An authoritative Bid and Ask quote are required.")
+    entry_error = pending_entry_error(order_type, side, entry_price, bid, ask)
+    if entry_error: blocking.append(entry_error)
     if not _valid_step(quantity, terms): blocking.append("Quantity does not match the provider minimum, maximum, or step.")
     if blocking:
         return _empty(terms, quantity, account_currency, quote_source, quote_timestamp, bid, ask, blocking)
-    entry = ask if side == "buy" else bid
+    entry = (ask if side == "buy" else bid) if order_type == "market" else entry_price
     assert entry is not None
     stop = _derived_price(stop_loss, entry, terms.pip_size, side, protective=True)
     stop_error = _protection_error("Stop Loss", stop, entry, side, protective=True, minimum=terms.minimum_stop_distance)
@@ -81,7 +85,8 @@ def calculate_order(*, terms: InstrumentTerms, side: str, quantity: float, bid: 
     return {
         "quote": {"bid": bid, "ask": ask, "spread": ask - bid, "timestamp": quote_timestamp.isoformat() if quote_timestamp else None,
                   "source": quote_source, "stale": stale},
-        "entry_price": _round(entry, terms.price_precision), "entry_side": "Ask" if side == "buy" else "Bid",
+        "entry_price": _round(entry, terms.price_precision), "entry_side": ("Ask" if side == "buy" else "Bid") if order_type == "market" else "Requested",
+        "order_type": order_type,
         "quantity": {"value": quantity, "unit": terms.quantity_unit, "minimum": terms.minimum_quantity,
                      "maximum": terms.maximum_quantity, "step": terms.quantity_step},
         "pip_size": terms.pip_size, "tick_size": terms.tick_size, "price_precision": terms.price_precision,
@@ -94,6 +99,20 @@ def calculate_order(*, terms: InstrumentTerms, side: str, quantity: float, bid: 
         "notional_exposure": _money(exposure), "margin_estimate": _money(margin),
         "warnings": warnings, "blocking_reasons": warnings,
     }
+
+
+def pending_entry_error(order_type: str, side: str, entry: float | None,
+                        bid: float | None, ask: float | None) -> str | None:
+    if order_type == "market": return None
+    if order_type not in {"limit", "stop"}: return "Unsupported order type."
+    if entry is None or not math.isfinite(entry) or entry <= 0:
+        return "Enter a positive pending-order price."
+    current = ask if side == "buy" else bid
+    if current is None or not math.isfinite(current) or current <= 0:
+        return "A current broker quote is required to validate the entry price."
+    below = (side == "buy") == (order_type == "limit")
+    if (entry < current if below else entry > current): return None
+    return f"A {side.title()} {order_type.title()} entry must be {'below' if below else 'above'} the current {'Ask' if side == 'buy' else 'Bid'}."
 
 
 def _empty(terms: InstrumentTerms, quantity: float, currency: str | None, source: str,

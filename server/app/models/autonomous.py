@@ -25,10 +25,10 @@ class AutonomousOrderProposal(StrictInputModel):
     snapshot_id: str = Field(min_length=1, max_length=80)
     pair: str = Field(min_length=6, max_length=10)
     side: Literal["long", "short"]
-    order_type: Literal["market", "limit"] = "market"
-    entry: float = Field(gt=0)
-    stop_loss: float = Field(gt=0)
-    take_profit: float = Field(gt=0)
+    order_type: Literal["market", "limit", "stop"] = "market"
+    entry: float = Field(gt=0, allow_inf_nan=False)
+    stop_loss: float = Field(gt=0, allow_inf_nan=False)
+    take_profit: float = Field(gt=0, allow_inf_nan=False)
     reason_codes: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("reason_codes")

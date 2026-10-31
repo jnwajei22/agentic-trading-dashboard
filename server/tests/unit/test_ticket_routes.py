@@ -75,3 +75,22 @@ def test_explicit_session_restriction_is_enforced(monkeypatch):
     setup(monkeypatch, profile_v2={"forex":{"sessions":["tokyo"]}})
     monkeypatch.setattr(trading.AutonomousDecisionRunner, "_session", staticmethod(lambda _: {"london"}))
     with pytest.raises(HTTPException): trading.ticket_profile("owner", "profile", "account-a")
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('order_type,entry', [('limit',1.09),('stop',1.11)])
+async def test_pending_preview_freezes_requested_entry_type_and_exits(monkeypatch,order_type,entry):
+    setup(monkeypatch)
+    seen={}
+    class Engine:
+        async def snapshot(self,*args):
+            return {'snapshot_id':'snapshot','market':{'pairs':{'EURUSD':{'quote':{'bid':1.1,'ask':1.1002},'instrument_metadata':{'pip_size':.0001,'price_precision':5}}}}}
+        _quote=staticmethod(lambda q:(q['bid'],q['ask']))
+        async def review(self,user,ref,proposal,**kwargs):
+            seen.update(proposal=proposal,**kwargs);return {'preview_id':'preview','lot_size':kwargs['requested_lots']}
+    monkeypatch.setattr(trading,'AutonomousDemoService',Engine)
+    payload=trading.TicketPreview(profile_ref='profile',account_id='account-a',instrument_id='forex:EUR/USD',side='buy',order_type=order_type,entry_price=entry,
+        quantity={'value':.01,'unit':'lot'},stop_loss={'mode':'pips','value':20},take_profit={'mode':'reward_multiple','value':2})
+    await trading.preview_ticket(payload,{'sub':'owner'})
+    assert seen['proposal'].entry==entry and seen['proposal'].order_type==order_type
+    assert seen['proposal'].stop_loss==pytest.approx(entry-.002)
+    assert seen['proposal'].take_profit==pytest.approx(entry+.004)

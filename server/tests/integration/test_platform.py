@@ -50,7 +50,8 @@ def _client_for(subject: str) -> TestClient:
     return TestClient(app)
 
 
-def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage,monkeypatch):
+@pytest.mark.parametrize("order_type,entry",[("market",None),("limit",1.34),("stop",1.35)])
+def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage,monkeypatch,order_type,entry):
     user="auth0|calculator";connection=platform_storage.save_connection(user,base_url="https://demo.example/backend-api",
         username="user",password="password",server="HeroFX",environment="demo")
     platform_storage.sync_accounts(user,connection.connection_ref,
@@ -68,13 +69,14 @@ def test_order_calculation_is_owned_read_only_and_never_submits(platform_storage
         async def submit_order(self,*args,**kwargs):Client.submitted=True;raise AssertionError("calculation cannot submit")
         _instrument_rows=staticmethod(lambda payload:payload)
     monkeypatch.setattr(platform,"TradeLockerClient",Client)
-    request={"account_id":account["public_id"],"instrument_id":"forex:GBP/USD","side":"buy","order_type":"market",
+    request={"account_id":account["public_id"],"instrument_id":"forex:GBP/USD","side":"buy","order_type":order_type,"entry_price":entry,
         "quantity":{"value":.5,"unit":"lot"},"stop_loss":{"mode":"pips","value":40},
         "take_profit":{"mode":"reward_multiple","value":2}}
     with _client_for(user) as client:
         response=client.post("/api/trading/order-calculations",json=request)
     assert response.status_code==200
-    result=response.json();assert result["entry_side"]=="Ask" and result["pip_value"]["value"]==5
+    result=response.json();assert result["entry_side"]==("Ask" if order_type=="market" else "Requested") and result["pip_value"]["value"]==5
+    assert result["entry_price"]==(1.34528 if order_type=="market" else entry)
     assert result["stop_loss"]["distance_pips"]==40 and result["take_profit"]["reward_to_risk"]==2
     assert Client.submitted is False and "preview_id" not in result
 
@@ -735,3 +737,15 @@ async def test_authorized_user_with_revoked_tradelocker_gets_setup_recovery(
         reset_current_claims(identity_token)
     assert result["status"] == "setup_required"
     assert "setup_url" in result
+
+
+def test_service_status_separates_keyless_research_from_execution_validation(platform_storage,monkeypatch):
+    monkeypatch.setattr(settings,"finnhub_enabled",False)
+    monkeypatch.setattr(settings,"fred_enabled",False)
+    with _client_for("auth0|status") as client:
+        services={item['id']:item for item in client.get('/api/status').json()['services']}
+    assert services['market_data']['status']=='configured' and 'Kraken' in services['market_data']['label']
+    assert services['news']['status']=='configured'
+    assert services['news_blackout']['status']=='not_configured'
+    assert services['macro']['status']=='not_configured'
+    assert services['automation']['status']=='not_running'
