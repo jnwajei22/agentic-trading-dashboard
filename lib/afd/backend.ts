@@ -7,7 +7,7 @@ export async function forwardToWorkspace<T>(path: string, init: RequestInit = {}
   let response: Response
   try {
     // Allow the private Python service and pooled database to wake on a cold start.
-    const executionRead = path.startsWith("/api/trading/order-previews") || /^\/api\/execution-profiles\/[^/]+\/demo-test/.test(path)
+    const executionRead = /^\/api\/trading\/(?:order-previews|order-submissions|action-previews|action-submissions|executions\/)/.test(path) || /^\/api\/execution-profiles\/[^/]+\/demo-test/.test(path)
     const timeout = AbortSignal.timeout(executionRead ? 90_000 : 30_000)
     response = await fetch(`${baseUrl}${path}`, {
       ...init,

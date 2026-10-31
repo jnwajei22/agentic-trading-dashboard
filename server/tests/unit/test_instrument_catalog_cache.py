@@ -61,7 +61,7 @@ async def test_scoped_quote_honors_read_cooldown_without_caching_prices():
     assert first != second
     assert sum(path.endswith('/quotes') for _,path in calls)==3
     assert sum(path.endswith('/instruments') for _,path in calls)==1
-    assert cooldowns == [2,1,1]
+    assert cooldowns[-3:] == [2,1.05,1.05]
     assert all(method=='GET' or path.endswith('/auth/jwt/token') for method,path in calls)
 
 

@@ -235,6 +235,8 @@ class TradeLockerClient:
                 headers["Authorization"] = f"Bearer {await self.login(force=True)}"
                 response = await self._http.request(method, path, headers=headers, **kwargs)
             response.raise_for_status()
+            if response.status_code == 204:
+                return {"s": "ok"}
             return response.json()
         except httpx.TimeoutException as exc:
             raise TradeLockerError(
@@ -266,20 +268,61 @@ class TradeLockerClient:
                 operation, "TradeLocker returned an unusable response.", code="request_failed"
             ) from None
 
+    def _scoped(self) -> bool:
+        return bool(self.cache_user_id and self.cache_connection_id and self.cache_account_record_id)
+
+    async def _governed_read(self, operation: str, read, *, quote: bool = False) -> Any:
+        """Pace scoped GETs across instances. Broker writes are never replayed here."""
+        scope = ("quotes:" + self.cache_connection_id + ":" + self.cache_account_record_id
+                 if quote else "reads:" + self.cache_connection_id + ":" + operation)
+        for attempt in range(2):
+            state = self.request_limiter.state(scope)
+            remaining = max(0.0, float(state.get("cooldown_epoch") or 0) - time.time())
+            if remaining > settings.tradelocker_rate_limit_max_backoff_seconds:
+                raise TradeLockerError(operation, "Broker requests are cooling down.", code="rate_limited", status_code=429,
+                    details={"retry_after_seconds": remaining})
+            try:
+                async with asyncio.timeout(settings.tradelocker_rate_limit_max_backoff_seconds + 1):
+                    lease = await self.request_limiter.acquire(scope)
+            except TimeoutError:
+                raise TradeLockerError(operation, "Broker request queue is busy.", code="rate_limited", status_code=429,
+                    details={"retry_after_seconds": settings.tradelocker_rate_limit_max_backoff_seconds}) from None
+            try:
+                result = await read()
+                self.request_limiter.set_cooldown(scope, 1.05)
+                return result
+            except TradeLockerError as exc:
+                if exc.status_code != 429:
+                    raise
+                delay = float(exc.details.get("retry_after_seconds") or 2)
+                self.request_limiter.set_cooldown(scope, delay)
+                if attempt or delay > settings.tradelocker_rate_limit_max_backoff_seconds:
+                    raise
+            finally:
+                self.request_limiter.release(lease)
+        raise AssertionError("read retry exhausted")
+
     async def _optional_get(self, path: str, *, operation: str, **kwargs: Any) -> Any:
-        try:
+        async def read():
             return await self._request("GET", path, operation=operation, **kwargs)
+        try:
+            if self._scoped() and operation != "get_quote":
+                return await self._governed_read(operation, read)
+            return await read()
         except TradeLockerError as exc:
             if exc.status_code in {404, 405, 501}:
                 return _not_implemented(operation)
             raise
 
     async def get_config(self) -> Any:
-        return await self._optional_get(
-            "/trade/config",
-            operation="get_config",
-            headers=self._account_headers("get_config"),
-        )
+        async def read():
+            return await self._optional_get("/trade/config", operation="get_config",
+                headers=self._account_headers("get_config"))
+        if not self._scoped():
+            return await read()
+        key = (self.cache_user_id, self.cache_connection_id, self.cache_account_record_id,
+               self.base_url, self.server, self.account_id, self.account_number, "config")
+        return await instrument_catalog_cache.get(key, read)
 
     async def get_accounts(self) -> Any:
         self.validate_login_config("get_accounts")
@@ -439,33 +482,9 @@ class TradeLockerClient:
         async def read():
             return await self._optional_get("/trade/quotes", operation="get_quote",
                 headers=self._account_headers(), params={"tradableInstrumentId":instrument_id,"routeId":route_id})
-        if not (self.cache_user_id and self.cache_connection_id and self.cache_account_record_id):
+        if not self._scoped():
             return await read()
-        scope="quotes:"+self.cache_connection_id+":"+self.cache_account_record_id
-        for attempt in range(2):
-            state=self.request_limiter.state(scope)
-            remaining=max(0.0,float(state.get("cooldown_epoch") or 0)-time.time())
-            if remaining > settings.tradelocker_rate_limit_max_backoff_seconds:
-                raise TradeLockerError("get_quote", "Broker price requests are cooling down.",code="rate_limited",status_code=429,
-                    details={"retry_after_seconds":remaining})
-            try:
-                async with asyncio.timeout(settings.tradelocker_rate_limit_max_backoff_seconds+1):
-                    lease=await self.request_limiter.acquire(scope)
-            except TimeoutError:
-                raise TradeLockerError("get_quote", "Broker price queue is busy.",code="rate_limited",status_code=429,
-                    details={"retry_after_seconds":settings.tradelocker_rate_limit_max_backoff_seconds}) from None
-            try:
-                result=await read()
-                self.request_limiter.set_cooldown(scope,1.0)
-                return result
-            except TradeLockerError as exc:
-                if exc.status_code != 429: raise
-                delay=float(exc.details.get("retry_after_seconds") or 2)
-                self.request_limiter.set_cooldown(scope,delay)
-                if attempt or delay > settings.tradelocker_rate_limit_max_backoff_seconds: raise
-            finally:
-                self.request_limiter.release(lease)
-        raise AssertionError("quote retry exhausted")
+        return await self._governed_read("get_quote", read, quote=True)
 
     async def _history_page(
         self,

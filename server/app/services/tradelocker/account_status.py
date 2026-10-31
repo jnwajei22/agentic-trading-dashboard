@@ -113,6 +113,8 @@ class TradeLockerAccountStatusService:
                 base_url=resolved.base_url, username=resolved.username, password=resolved.password,
                 server=resolved.server, account_id=resolved.account_id,
                 account_number=resolved.account_number,
+                cache_user_id=auth0_user_id, cache_connection_id=resolved.connection_ref,
+                cache_account_record_id=resolved.account_record_id,
             )
             try:
                 accounts = await client.get_accounts()

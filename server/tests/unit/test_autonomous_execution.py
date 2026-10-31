@@ -611,7 +611,7 @@ class SubmissionClient:
     def config():
         order_columns = [
             "id", "tradableInstrumentId", "qty", "side", "type", "status", "price",
-            "stopLoss", "takeProfit", "isOpen", "strategyId", "accountId", "accNum",
+            "stopLoss", "takeProfit", "isOpen", "strategyId", "accountId", "accNum", "lastModified",
         ]
         return {"d": {
             "ordersConfig": {"columns": [{"id": key} for key in order_columns]},
@@ -625,7 +625,7 @@ class SubmissionClient:
     def order_row(self):
         return [
             "432345564236299554", "4665", "1.19", "buy", "limit", "New", "1.143",
-            "1.141", "1.147", "true", self.strategy_id, "account-a", "1001",
+            "1.141", "1.147", "true", self.strategy_id, "account-a", "1001", datetime.now(timezone.utc).isoformat(),
         ]
 
     async def get_config(self): return self.config()
@@ -650,6 +650,8 @@ class SubmissionClient:
 
 def submission_preview():
     return {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
         "id": "preview_c17435280a1e4d12b380b9f2de482813",
         "account_id": "account-a", "acc_num": "1001", "pair": "EURUSD",
         "instrument_id": "4665", "side": "long", "order_type": "limit",
@@ -897,3 +899,77 @@ async def test_shadow_snapshot_includes_full_history_without_enabling_execution(
     snapshot=await service.snapshot("user",profile,autonomous=False,include_history=True)
     assert all(snapshot["market"]["pairs"]["EURUSD"]["timeframes"][frame]["status"]=="ok" for frame in ("1d","4h","1h","15m"))
     assert service.execution.get_autonomous_controls("user")["demo_autonomous_enabled"] is False
+
+@pytest.mark.asyncio
+async def test_acknowledged_order_id_survives_post_dispatch_read_failure(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    client = SubmissionClient()
+    original = client.place_order
+    async def acknowledged(payload):
+        await original(payload)
+        return {"d": {"orderId": "acknowledged-order"}}
+    client.place_order = acknowledged
+    service, repository, preview_id, _ = submission_service(tmp_path, monkeypatch, client, origin="manual")
+    service._poll_reconciliation = AsyncMock(side_effect=TradeLockerError("get_orders", "cooldown", code="rate_limited", status_code=429))
+    result = await service.submit("user", preview_id, "manual:acknowledged-key")
+    assert result["status"] == "unknown"
+    assert result["broker_order_id"] == "acknowledged-order"
+    stored = repository.get_submission(preview_id=preview_id)
+    assert stored["broker_response_sanitized"]["response_received"] is True
+    duplicate = await service.submit("user", preview_id, "manual:acknowledged-key")
+    assert duplicate["broker_order_id"] == "acknowledged-order"
+    assert client.place_order_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_dispatch", [False, True])
+async def test_cancellation_is_durable_and_never_replays_a_write(tmp_path, monkeypatch, during_dispatch):
+    import asyncio
+    client = SubmissionClient()
+    service, repository, preview_id, _ = submission_service(tmp_path, monkeypatch, client, origin="manual")
+    if during_dispatch:
+        async def cancelled(payload):
+            client.place_order_calls += 1
+            raise asyncio.CancelledError
+        client.place_order = cancelled
+    else:
+        async def cancelled_quote(symbol): raise asyncio.CancelledError
+        client.get_quote = cancelled_quote
+    with pytest.raises(asyncio.CancelledError):
+        await service.submit("user", preview_id, "manual:cancelled-key")
+    stored = repository.get_submission(preview_id=preview_id)
+    assert stored["submission_state"] == ("unknown" if during_dispatch else "rejected")
+    if during_dispatch:
+        assert stored["execution_id"]
+    await service.submit("user", preview_id, "manual:cancelled-key")
+    assert client.place_order_calls == int(during_dispatch)
+
+
+def market_fill_payload(*, price="1.14295", timestamp=None, count=1, order_type="market"):
+    client = SubmissionClient()
+    preview = submission_preview()
+    preview["order_type"] = order_type
+    row = client.order_row()
+    row[4], row[5], row[6], row[10] = order_type, "Filled", price, None
+    row[-1] = timestamp or datetime.now(timezone.utc).isoformat()
+    rows = [row]
+    if count == 2:
+        second = row.copy(); second[0] = "another-order"; rows.append(second)
+    return client.config(), {"d": []}, {"d": rows}, {"d": []}, preview
+
+
+def test_market_fill_allows_existing_tolerance_and_requires_unique_recent_composite():
+    result = AutonomousDemoService._reconcile(*market_fill_payload(), {})
+    assert result["verified"] and result["entry"] == pytest.approx(1.14295)
+    assert result["matching_method"] == "composite"
+    for kwargs in ({"price":"1.15"}, {"timestamp":(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()}, {"count":2}, {"order_type":"limit"}):
+        assert AutonomousDemoService._reconcile(*market_fill_payload(**kwargs), {})["verified"] is False
+
+
+def test_market_zero_request_price_requires_positive_fill_and_missing_time_cannot_match_composite():
+    args = list(market_fill_payload(price="0"))
+    assert AutonomousDemoService._reconcile(*args, {"orderId":"432345564236299554"})["verified"] is False
+    args = list(market_fill_payload())
+    args[2]["d"][0][-1] = None
+    assert AutonomousDemoService._reconcile(*args, {})["verified"] is False
+    assert AutonomousDemoService._reconcile(*args, {"orderId":"432345564236299554"})["verified"] is True

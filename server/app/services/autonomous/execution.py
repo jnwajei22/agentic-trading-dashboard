@@ -374,7 +374,7 @@ class AutonomousDemoService:
         base_matches = _normalized_url(connection.base_url) == _normalized_url(settings.tradelocker_demo_base_url)
         if connection.environment != "demo" or resolved.demo_classification != "demo" or not base_matches:
             raise AutonomousExecutionError("demo_environment_verification_failed", "Order execution is available only for a verified TradeLocker demo account.", reasons=["account_not_demo"])
-        client = self._client(connection)
+        client = self._client(connection, scope=(user_sub, resolved.connection_ref, resolved.account_record_id))
         try:
             discovered = await client.get_accounts()
             profile_v2=profile.get("profile_v2") or {}
@@ -410,13 +410,15 @@ class AutonomousDemoService:
         )
 
     def _client(
-        self, connection: BrokerConnection, context: VerifiedDemoContext | None = None
+        self, connection: BrokerConnection, context: VerifiedDemoContext | None = None,
+        *, scope: tuple[str, str, str] | None = None
     ) -> TradeLockerClient:
         cache_scope = ({
             "cache_user_id": context.user_sub,
             "cache_connection_id": context.connection_ref,
             "cache_account_record_id": context.account_record_id,
-        } if context is not None else {})
+        } if context is not None else {"cache_user_id": scope[0], "cache_connection_id": scope[1],
+            "cache_account_record_id": scope[2]} if scope else {})
         return self.client_factory(
             base_url=connection.base_url, username=connection.username,
             password=connection.password, server=connection.server,
@@ -1018,6 +1020,7 @@ class AutonomousDemoService:
         )
         # Forced fresh status and broker state are retrieved after the durable claim.
         dispatched = False
+        dispatch_started = False
         autonomous_origin = preview.get("execution_origin") == "autonomous"
         try:
             account = await self.account_status_service.retrieve(user_sub, context.account_alias)
@@ -1068,7 +1071,7 @@ class AutonomousDemoService:
                     raise AutonomousExecutionError("spread_too_wide", "The current spread exceeds the configured maximum.", status="rejected")
                 account_currency = (context.currency or account.account.currency or "").upper()
                 conversion = await self._fresh_conversion_rate(client, metadata.quote_currency, account_currency)
-                current_risk_per_lot = ((abs(preview["entry"] - preview["stop_loss"]) + (ask - bid)) * metadata.contract_size * conversion + metadata.commission_per_lot)
+                current_risk_per_lot = ((abs((current if preview["order_type"] == "market" else preview["entry"]) - preview["stop_loss"]) + (ask - bid)) * metadata.contract_size * conversion + metadata.commission_per_lot)
                 if current_risk_per_lot * preview["lot_size"] > fresh_risk_base * context.risk["risk_per_trade_percent"] / 100:
                     raise AutonomousExecutionError("risk_limit_changed", "Fresh market state would exceed the account risk limit.", status="rejected")
                 if abs(current - preview["entry"]) / preview["entry"] * 100 > settings.autonomous_price_tolerance_percent:
@@ -1118,11 +1121,22 @@ class AutonomousDemoService:
                     order_payload["price"] = 0
                 response: Any = None
                 ambiguous_submit_error: TradeLockerError | None = None
+                if (datetime.fromisoformat(preview["expires_at"]) <= utcnow()
+                        or datetime.fromisoformat(snapshot["expires_at"]) <= utcnow()):
+                    raise AutonomousExecutionError("preview_expired", "The reviewed order expired before dispatch.", status="rejected")
                 if before_dispatch: before_dispatch()
+                self.execution.update_submission(submission_id, submission_state="dispatching")
+                dispatch_started = True
                 try:
                     # The durable claim already exists. Never call place_order again for this preview/key.
                     response = await client.place_order(order_payload)
                     dispatched = True
+                    acknowledged_id = _find_value(response, ("orderId", "id"))
+                    acknowledged_id = str(acknowledged_id) if acknowledged_id is not None else None
+                    self.execution.update_submission(submission_id, submission_state="dispatched",
+                        broker_order_id=acknowledged_id,
+                        broker_response_sanitized_json={"response_received": True, "order_id": acknowledged_id},
+                        submitted_at=utcnow().isoformat())
                 except TradeLockerError as exc:
                     ambiguous = (
                         exc.code in {"timeout", "request_failed"}
@@ -1176,6 +1190,18 @@ class AutonomousDemoService:
                 "order_type":preview["order_type"],"quantity":preview["lot_size"],
                 "quantity_lots":preview["lot_size"],"quantity_units":preview["quantity"],
                 "entry":preview["entry"],"stop_loss":preview["stop_loss"],"take_profit":preview["take_profit"]}
+        except asyncio.CancelledError:
+            state = "unknown" if dispatch_started else "rejected"
+            self.execution.update_submission(submission_id, submission_state=state,
+                reconciliation_json={"error": "request_interrupted", "manual_review_required": dispatch_started,
+                    "message": "Request interrupted after dispatch began; check broker status before taking another action."
+                        if dispatch_started else "Request interrupted before broker dispatch."})
+            if dispatch_started:
+                self.execution.mark_preview_submitted(preview_id)
+                stored = self.execution.get_submission(preview_id=preview_id) or {}
+                execution_id = self._record_run(context, preview, state, stored.get("broker_order_id"), self._submission_result(stored))
+                self.execution.update_submission(submission_id, execution_id=execution_id)
+            raise
         except AutonomousExecutionError as exc:
             self.execution.update_submission(submission_id, submission_state="rejected", reconciliation_json=exc.as_dict())
             logger.warning(
@@ -1337,17 +1363,55 @@ class AutonomousDemoService:
         expected_side = "buy" if preview["side"] == "long" else "sell"
         expected_type = _normalized_order_type(preview.get("order_type"))
 
+        def execution_entry(row: dict[str, Any]) -> Any:
+            if expected_type == "stop":
+                return _find_value(row, ("stopPrice",))
+            if expected_type == "market":
+                # A market request has price=0; confirmation must use a positive fill.
+                for key in ("avgPrice", "fillPrice", "price", "entryPrice", "openPrice"):
+                    value = _find_value(row, (key,))
+                    if (parsed := _decimal(value)) is not None and parsed > 0:
+                        return value
+                return None
+            return _find_value(row, ("price", "entryPrice", "openPrice"))
+
+        def entry_matches(entry: Any) -> bool:
+            if expected_type != "market":
+                return numeric_matches(entry, preview.get("entry"), tick)
+            actual, expected = _decimal(entry), _decimal(preview.get("entry"))
+            if actual is None or expected is None or actual <= 0 or expected <= 0:
+                return False
+            return abs(actual - expected) / expected * 100 <= Decimal(str(settings.autonomous_price_tolerance_percent))
+
+        def parse_time(value: Any) -> datetime | None:
+            try:
+                if value is None: return None
+                try:
+                    numeric = float(value)
+                    return datetime.fromtimestamp(numeric / 1000 if numeric >= 1e12 else numeric, timezone.utc)
+                except (TypeError, ValueError):
+                    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                    return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+            except (ValueError, OverflowError, OSError):
+                return None
+
+        def timely(row: dict[str, Any]) -> bool:
+            created, expires = parse_time(preview.get("created_at")), parse_time(preview.get("expires_at"))
+            observed = parse_time(_find_value(row, ("createdDate", "createdAt", "openDate", "filledAt", "lastModified", "timestamp")))
+            return bool(created and expires and observed and created - timedelta(seconds=5) <= observed <= expires + timedelta(seconds=5))
+
         def composite_matches(row: dict[str, Any]) -> bool:
             lots, _ = quantity_values(row)
             actual_type = _normalized_order_type(_find_value(row, ("type", "orderType")))
-            entry = _find_value(row, ("stopPrice",)) if expected_type == "stop" else _find_value(row, ("price", "entryPrice", "openPrice"))
+            entry = execution_entry(row)
             return (
                 account_matches(row)
                 and instrument_matches(row)
                 and _normalized_side(_find_value(row, ("side",))) == expected_side
                 and actual_type == expected_type
                 and numeric_matches(lots, preview["lot_size"], lot_step)
-                and numeric_matches(entry, preview["entry"], tick)
+                and entry_matches(entry)
+                and timely(row)
                 and numeric_matches(_find_value(row, ("stopLoss",)), preview["stop_loss"], tick)
                 and numeric_matches(_find_value(row, ("takeProfit",)), preview["take_profit"], tick)
             )
@@ -1363,8 +1427,13 @@ class AutonomousDemoService:
             if selected:
                 matching_method = "correlation_id"
         if selected is None:
-            selected = next((item for item in candidates if composite_matches(item[0])), None)
-            if selected:
+            matches = [item for item in order_candidates if composite_matches(item[0])]
+            # The same ID can appear in pending and history during a transition.
+            unique = {str(_find_value(item[0], ("orderId", "id"))): item for item in matches}
+            if not unique:
+                unique = {str(_find_value(item[0], ("positionId", "id"))): item for item in position_candidates if composite_matches(item[0])}
+            if len(unique) == 1:
+                selected = next(iter(unique.values()))
                 matching_method = "composite"
 
         order, source = selected if selected else (None, None)
@@ -1376,7 +1445,7 @@ class AutonomousDemoService:
         side = _normalized_side(_find_value(order, ("side",)))
         stop = _find_value(order, ("stopLoss",))
         target = _find_value(order, ("takeProfit",))
-        entry = _find_value(order, ("stopPrice",)) if expected_type == "stop" else _find_value(order, ("price", "entryPrice", "openPrice"))
+        entry = execution_entry(order) if order else None
         actual_type = _normalized_order_type(_find_value(order, ("type", "orderType")))
         broker_status = str(_find_value(order, ("status", "orderStatus")) or "").strip() or None
         status_normalized = (broker_status or "").lower().replace("_", "").replace(" ", "")
@@ -1393,7 +1462,7 @@ class AutonomousDemoService:
             "quantity_matches": numeric_matches(lots, preview["lot_size"], lot_step),
             "side_matches": side == expected_side,
             "order_type_matches": (actual_type == expected_type) if actual_type else identity_match,
-            "entry_matches": numeric_matches(entry, preview["entry"], tick) if entry is not None else identity_match,
+            "entry_matches": entry_matches(entry) if entry is not None else (identity_match and expected_type != "market"),
             "stop_loss_matches": numeric_matches(stop, preview["stop_loss"], tick),
             "take_profit_matches": numeric_matches(target, preview["take_profit"], tick),
             "broker_status_accepted": bool(order) and accepted_status,
@@ -1426,7 +1495,8 @@ class AutonomousDemoService:
             "execution_id": record.get("execution_id"), "broker_order_id": record.get("broker_order_id"),
             "broker_position_id": record.get("broker_position_id"),
             "broker_status": reconciliation.get("broker_status"),
-            "manual_review_required": state == "unknown", "reconciliation": reconciliation,
+            "manual_review_required": state in {"unknown", "dispatching", "dispatched", "pending"}, "reconciliation": reconciliation,
+            "message": reconciliation.get("message"),
         }
 
     def _record_run(self, context: VerifiedDemoContext, preview: dict[str, Any], state: str, broker_order_id: str | None, result: dict[str, Any]) -> str:
