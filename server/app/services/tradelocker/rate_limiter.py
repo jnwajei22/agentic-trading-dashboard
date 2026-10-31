@@ -63,7 +63,11 @@ class TradeLockerRequestLimiter:
                          datetime.now(timezone.utc).isoformat(), connection_id))
                     db.execute("COMMIT")
                     return LimiterLease(connection_id, owner, time.time() - started)
-                wait_for = min(max(0.01, available_at - now), settings.tradelocker_rate_limit_max_backoff_seconds)
+                # A lease is a crash-recovery deadline, not a promised busy duration.
+                # Poll held leases promptly so an early release wakes queued reads;
+                # real provider cooldowns retain their full configured backoff.
+                poll_cap = 0.25 if lease_until > now else settings.tradelocker_rate_limit_max_backoff_seconds
+                wait_for = min(max(0.01, available_at - now), poll_cap)
                 db.execute("COMMIT")
             await asyncio.sleep(wait_for)
 
