@@ -9,7 +9,7 @@ const workspace=source("app/(desk)/activity/workspace.tsx");const page=source("a
 const event=(overrides:Partial<ActivityEvent>):ActivityEvent=>({id:"event",event_type:"strategy_evaluated",occurred_at:"2026-07-19T17:42:00Z",...overrides})
 
 test("Activity header owns the filtered CSV export action",()=>{
-  assert.match(workspace,/PageHeader title="Activity"/);assert.match(workspace,/actions=\{<Button[^>]*onClick=\{csv\}/)
+  assert.match(workspace,/PageHeader title="Activity"/);assert.match(workspace,/actions=\{<div[^\n]*onClick=\{csv\}/)
   assert.match(workspace,/Exports the currently filtered activity/);assert.doesNotMatch(page,/Structured audit/i)
   assert.doesNotMatch(workspace,/grid[^\n]*Export CSV/)
 })

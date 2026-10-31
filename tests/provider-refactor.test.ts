@@ -19,13 +19,12 @@ test("strict proxy permits generic provider contracts without becoming generic",
   assert.equal(isAllowedAfdRoute("trading/connections/conn_1", "PATCH"), false)
 })
 
-test("connection cards distinguish broker platform chart and signal roles", () => {
+test("connections expose the active execution and Kraken research providers", () => {
   const settings = source("app/(desk)/settings/broker/settings.tsx")
   assert.match(settings, /Connected through/)
-  assert.match(settings, /TradingView is not a broker/)
-  assert.match(settings, /Charts and Signals/)
-  assert.match(settings, /Robinhood Agentic MCP boundary only/)
-  assert.match(settings, /Coming Later|Not Configured/)
+  assert.match(settings, /Kraken/)
+  assert.match(settings, /orders use your execution account/)
+  assert.doesNotMatch(settings, /ProviderChoice name="TradingView|ProviderCard title="Robinhood/)
 })
 
 test("Markets selection is canonical interactive and race safe", () => {

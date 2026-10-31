@@ -24,9 +24,10 @@ from app.models.autonomous import ExecutionMode, ExecutionSettingsUpdate
 from app.services.autonomous.execution import AutonomousDemoService, AutonomousExecutionError
 from app.services.autonomous.runner import AutonomousDecisionRunner
 from app.services.autonomous.decision import decision_provider_readiness
-from app.jobs.autonomous_scheduler import AutonomousScheduleService
+from app.jobs.autonomous_scheduler import AutonomousScheduleService, normalize_recurrence, next_recurrence_utc
 from app.storage.schedules import ScheduleRepository, ScheduleStorageError
 from app.storage.execution import ExecutionRepository
+from app.storage.events import WorkspaceEventRepository
 from app.storage.user_experience import UserExperienceRepository
 from app.storage.runtime_settings import RuntimeSettingsRepository
 from app.services.tradelocker.config_cache import tradelocker_config_cache
@@ -116,8 +117,19 @@ class ExecutionProfileUpdate(BaseModel):
     minimum_confidence: float | None = Field(default=None,ge=0,le=1)
 
 
+class ProfileAutomationPatch(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    execution_mode: Literal["read_only","demo_manual","demo_autonomous","disabled"] | None = None
+    decision_provider: Literal["openai","no_trade"] | None = None
+    model_identifier: str | None = Field(default=None,max_length=80)
+    news_filter_enabled: bool | None = None
+    cooldown_minutes_after_loss: int | None = Field(default=None,ge=0,le=1440)
+
+
 class ExecutionProfileV2Patch(BaseModel):
     model_config=ConfigDict(extra="forbid")
+    name: str | None = Field(default=None,min_length=1,max_length=64)
+    automation: ProfileAutomationPatch | None = None
     schema_version: Literal[2] | None = None
     asset_class:Literal["forex","equities","options"]|None=None
     trading_account:str|None=None
@@ -230,7 +242,10 @@ def _profile_contract(profile: dict[str, Any], instruments: list[dict[str, Any]]
     migration = profile.get("migration_state", "legacy_projected")
     warnings = ([{"code":"legacy_profile_projected","message":"This legacy profile is projected into V2 and will be persisted on its next PATCH."}]
         if migration != "native_v2" else [])
-    return {"profile_id":profile["public_id"], "account_id":profile["account_id"], "account_alias":profile["account_alias"],
+    return {"profile_id":profile["public_id"], "name":profile["name"],
+        "automation":{key:profile.get(key) for key in ("execution_mode","decision_provider","model_identifier","news_filter_enabled","cooldown_minutes_after_loss")},
+        "default_model":settings.autonomous_decision_model or settings.agent_model,
+        "provider_readiness":decision_provider_readiness(profile.get("decision_provider"),profile.get("model_identifier")), "account_id":profile["account_id"], "account_alias":profile["account_alias"],
         "account_number":profile.get("account_number"),"broker_name":profile.get("broker_name"),
         "account_environment":profile.get("account_environment"),"nickname":profile.get("nickname"),
         "profile":profile["profile_v2"], "supported_enum_options":_capabilities(profile, instruments),
@@ -951,9 +966,12 @@ async def get_execution_profile_v2(profile_id:str,claims:dict=Depends(current_cl
 @router.patch("/execution-profiles/{profile_id}")
 async def patch_execution_profile_v2(profile_id:str,payload:ExecutionProfileV2Patch,claims:dict=Depends(current_claims))->dict:
     patch=payload.model_dump(exclude_none=True)
+    if payload.automation is not None:patch["automation"]=payload.automation.model_dump(exclude_unset=True)
     try: profile=repository().update_profile_v2(claims["sub"],profile_id,patch)
     except ValidationError as exc:
         raise HTTPException(status_code=422,detail={"error":"profile_validation_failed","fields":exc.errors(include_url=False)}) from None
+    except BrokerStorageError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from None
     if not profile:raise HTTPException(status_code=404,detail="Profile not found.")
     tradelocker_config_cache.invalidate_user(claims["sub"])
     instrument_catalog_cache.invalidate_user(claims["sub"])
@@ -1052,7 +1070,6 @@ async def delete_execution_profile(profile_id: str, confirmation_name: str, clai
     if confirmation_name!=profile["name"]:
         raise HTTPException(status_code=409,detail={"error":"profile_name_confirmation_required",
             "message":"Type the exact profile name to delete this profile."})
-    ScheduleRepository().disable_profile_schedule(claims["sub"],profile_id)
     if not repository().delete_profile(claims["sub"],profile_id):
         raise HTTPException(status_code=404, detail="Profile not found.")
     return {"status":"deleted","profile_id":profile_id}
@@ -1111,8 +1128,9 @@ async def run_profile_demo_test(profile_id:str,claims:dict=Depends(current_claim
     try:
         result=await AutonomousDecisionRunner().run(claims["sub"],profile_id,
             f"demo-test:{profile_id}:{uuid.uuid4().hex[:16]}","demo_test",dry_run=True)
-        return {**result,"dry_run":True,"submission_allowed":False,
-            "message":"Analysis completed without submitting an order."}
+        record=ExecutionRepository().get_decision_run(claims["sub"],result.get("run_id")) if result.get("run_id") else None
+        return {**result,"decision":(record or {}).get("decision",{}),"validation":(record or {}).get("validation",{}),
+            "dry_run":True,"submission_allowed":False,"message":"Analysis completed without submitting an order."}
     except AutonomousExecutionError as exc:raise HTTPException(status_code=409,detail=exc.as_dict()) from None
 
 
@@ -1135,10 +1153,33 @@ async def activity(account_alias:str|None=None,profile_id:str|None=None,event_ty
             "environment":profile.get("account_environment"),"profile_id":record.get("profile_ref"),"strategy_name":profile.get("name"),
             "outcome":public["outcome"],"symbol":public.get("symbol"),"reason_codes":public.get("reason_codes",[]),
             "confidence":(record.get("decision") or {}).get("confidence"),"dry_run":bool(record.get("shadow_mode")),"run_id":record.get("id")})
-    for record in execution.recent_executions(claims["sub"],100):
-        events.append({"id":record.get("id"),"event_type":"demo_order_submitted","occurred_at":record.get("created_at"),
-            "profile_id":record.get("profile_ref"),"outcome":str(record.get("state") or "submitted").upper(),
-            "symbol":record.get("symbol"),"environment":"demo"})
+    accounts={item["public_id"]:item for item in repo.list_accounts(claims["sub"])}
+    for record in execution.recent_executions(claims["sub"],200):
+        action=record.get("action_type")
+        if action=="autonomous_decision":continue # Already represented by its decision run.
+        if action not in {"submit","close_position","cancel_order"}:continue
+        state=str(record.get("state") or "unknown").lower()
+        kind="demo_order_submitted" if action=="submit" else ("position_close_requested" if action=="close_position" else "order_cancel_requested")
+        if state in {"rejected","failed","error"}:kind="order_rejected"
+        profile=profiles.get(record.get("profile_ref"),{})
+        events.append({"id":record.get("id"),"event_type":kind,"occurred_at":record.get("created_at"),
+            "profile_id":record.get("profile_ref"),"strategy_name":profile.get("name"),"account_alias":record.get("account_alias"),
+            "account_number":record.get("account_number"),"symbol":record.get("symbol"),"outcome":state.upper(),"environment":"demo","reason_codes":[record["error_category"]] if record.get("error_category") else [],
+            "summary":f"{action.replace('_',' ').capitalize()}: {state}. Broker reference: {record.get('target_id') or 'pending'}"})
+    for record in WorkspaceEventRepository().list(claims["sub"]):
+        profile=profiles.get(record.get("profile_ref"),{});account=accounts.get(record.get("account_ref"),{})
+        events.append({"id":record["id"],"event_type":record["event_type"],"occurred_at":record["occurred_at"],
+            "profile_id":record.get("profile_ref"),"strategy_name":profile.get("name") or record["details"].get("name"),
+            "account_alias":profile.get("account_alias") or account.get("alias"),
+            "account_number":profile.get("account_number") or account.get("account_number"),
+            "environment":profile.get("account_environment") or account.get("environment"),
+            "outcome":"CONFIRMED","summary":record["summary"],"details":record["details"]})
+    for record in ScheduleRepository().list_dispatches(claims["sub"],200):
+        profile=profiles.get(record.get("profile_ref"),{})
+        events.append({"id":record["id"],"event_type":"schedule_run","occurred_at":record.get("finished_at") or record["created_at"],
+            "profile_id":record.get("profile_ref"),"strategy_name":profile.get("name"),"account_alias":profile.get("account_alias"),
+            "outcome":str(record.get("outcome") or record["state"]).upper(),"run_id":record.get("run_id"),
+            "reason_codes":[record["reason_code"]] if record.get("reason_code") else []})
     for record in execution.autonomous_control_audit(claims["sub"],100):
         enabled=bool(record.get("new_value"));control=record.get("control_name")
         kind=("kill_switch_enabled" if enabled else "kill_switch_disabled") if control=="global_autonomous_kill_switch" else "safety_control_updated"
@@ -1151,6 +1192,29 @@ async def activity(account_alias:str|None=None,profile_id:str|None=None,event_ty
             and (not date_from or stamp>=date_from.isoformat()) and (not date_to or stamp<=date_to.isoformat())
     filtered=sorted((item for item in events if keep(item)),key=lambda item:str(item.get("occurred_at") or ""),reverse=True)
     return {"events":filtered,"count":len(filtered),"generated_at":datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/workspace-export")
+async def export_workspace(claims:dict=Depends(current_claims))->dict:
+    repo=repository();user=claims["sub"];ux=UserExperienceRepository()
+    profiles=[{"profile_id":item["public_id"],"name":item["name"],"account_alias":item.get("account_alias"),
+        "profile":item.get("profile_v2"),"execution_mode":item.get("execution_mode"),
+        "decision_provider":item.get("decision_provider"),"model_identifier":item.get("model_identifier")} for item in repo.list_profiles(user)]
+    prefs=ux.preferences(user);prefs.pop("user_sub",None)
+    return {"export_version":1,"generated_at":datetime.now(timezone.utc).isoformat(),"preferences":prefs,
+        "profiles":profiles,"schedules":AutonomousScheduleService().list(user),"watchlists":ux.list_watchlists(user),
+        "activity":(await activity(claims=claims))["events"],
+        "excluded":["broker credentials","API keys","assistant conversations","model prompts"]}
+
+
+@router.post("/autonomous-schedule-preview")
+async def preview_schedule(payload:AutonomousScheduleRequest,claims:dict=Depends(current_claims))->dict:
+    try:
+        rule=normalize_recurrence(payload.recurrence,payload.local_times);cursor=datetime.now(timezone.utc);times=[]
+        for _ in range(5):
+            cursor=next_recurrence_utc(cursor,payload.timezone,rule);times.append(cursor.isoformat())
+        return {"next_run_times":times,"timezone":payload.timezone,"recurrence":rule}
+    except ScheduleStorageError as exc:raise HTTPException(status_code=422,detail=str(exc)) from None
 
 
 @router.get("/status")

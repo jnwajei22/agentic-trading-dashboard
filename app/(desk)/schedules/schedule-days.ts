@@ -33,8 +33,7 @@ export function naturalSchedule(value:ScheduleBuilder,capability:WeekendCapabili
   const days=dayPhrase(value.days)
   const marketAware=value.marketAware?", while selected markets are open":""
   const mixed=value.days.some(day=>day==="saturday"||day==="sunday")&&capability==="mixed"?"; only markets available on weekends will be evaluated on Saturday and Sunday":""
-  if(value.type==="market_session")return `Runs during the ${value.sessions.map(formatEnum).join(", ")} session, ${days}, in ${value.timezone}${marketAware}${mixed}.`
-  if(value.days.length===7&&capability==="crypto_only")return "Runs every day for available crypto markets."
+  if(value.type==="market_session")return `Checks at the ${value.sessions.map(formatEnum).join(", ")} session open, ${days}, shown in ${value.timezone}${marketAware}${mixed}.`
   if(value.type==="recurring_interval")return `Runs every ${value.interval<60?`${value.interval} minutes`:`${value.interval/60} hours`}, ${days}, between ${value.start} and ${value.end} in ${value.timezone}${marketAware}${mixed}.`
   return `Runs at ${value.time}, ${days}, in ${value.timezone}${marketAware}${mixed}.`
 }

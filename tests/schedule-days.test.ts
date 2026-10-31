@@ -37,9 +37,9 @@ test("validation requires at least one trading day",()=>{
   assert.match(manager,/if\(!builder\.days\.length\)/);assert.match(manager,/Select at least one trading day\./)
 })
 test("natural-language preview reflects presets custom days sessions and weekend scope",()=>{
-  assert.equal(naturalSchedule(builder([...WEEKDAYS]),"weekday_only"),"Runs during the London session, Monday through Friday, in America/Chicago, while selected markets are open.")
-  assert.equal(naturalSchedule(builder(["monday","wednesday","friday"]),"weekday_only"),"Runs during the London session, Monday, Wednesday, and Friday, in America/Chicago, while selected markets are open.")
-  assert.equal(naturalSchedule(builder([...DAYS],"daily"),"crypto_only"),"Runs every day for available crypto markets.")
+  assert.equal(naturalSchedule(builder([...WEEKDAYS]),"weekday_only"),"Checks at the London session open, Monday through Friday, shown in America/Chicago, while selected markets are open.")
+  assert.equal(naturalSchedule(builder(["monday","wednesday","friday"]),"weekday_only"),"Checks at the London session open, Monday, Wednesday, and Friday, shown in America/Chicago, while selected markets are open.")
+  assert.match(naturalSchedule(builder([...DAYS],"daily"),"crypto_only"),/every day.*America\/Chicago/)
   assert.match(naturalSchedule(builder([...DAYS]),"mixed"),/only markets available on weekends/)
 })
 test("legacy weekend selections remain intact and visibly warn",()=>{

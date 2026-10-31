@@ -225,6 +225,7 @@ async def test_real_runner_records_pending_limit_without_preview_or_broker_write
         model_identifier="server-test-model", minimum_confidence=.7)
     execution.update_autonomous_controls("user", {"demo_autonomous_enabled": True,
         "global_autonomous_kill_switch": False}, updated_by="test", source="test")
+    brokers.update_profile_v2("user",profile["public_id"],{"automation":{"execution_mode":"demo_autonomous"}})
     demo = PendingLimitDemo()
     provider = DeterministicTestDecisionProvider(StructuredDecision(action=DecisionAction.TRADE,
         symbol="EURUSD", side="long", order_type="market", entry=1.1001, stop_loss=1.099,

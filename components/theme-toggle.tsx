@@ -2,11 +2,14 @@
 
 import * as React from "react"
 import { Moon, Sun } from "lucide-react"
+import {usePreferences} from "@/components/desk/preferences-provider"
 import { useTheme } from "next-themes"
 
 export function ThemeToggle() {
   const [mounted, setMounted] = React.useState(false)
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
+  const {save,ready}=usePreferences();const [error,setError]=React.useState("")
+  async function toggle(){const next=resolvedTheme==="dark"?"light":"dark";try{if(ready)await save({appearance:next});else setTheme(next);setError("")}catch{setError("Could not save theme")}}
 
   React.useEffect(() => {
     setMounted(true)
@@ -14,7 +17,8 @@ export function ThemeToggle() {
 
   return (
     <button
-      onClick={() => mounted && setTheme(theme === "dark" ? "light" : "dark")}
+      onClick={() => mounted && void toggle()}
+      title={error||"Toggle color theme"}
       disabled={!mounted}
       aria-disabled={!mounted}
       aria-label="Toggle color theme"
