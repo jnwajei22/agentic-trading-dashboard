@@ -197,3 +197,25 @@ def test_daily_summary_reports_outcomes_account_state_and_real_entries(tmp_path)
     summary=service.daily_summary("u")
     assert summary["outcomes"]["NO_TRADE"]==1 and summary["daily_entry_count"]==0
     assert summary["runs"][0]["balance"]==1000 and summary["runs"][0]["daily_pnl"]==-10
+
+
+def test_dst_repeat_runs_once_and_nonexistent_local_time_is_skipped():
+    first=next_scheduled_utc(datetime(2026,11,1,6,tzinfo=timezone.utc),'America/Chicago',['01:30'])
+    assert first==datetime(2026,11,1,6,30,tzinfo=timezone.utc)
+    following=next_scheduled_utc(first+timedelta(minutes=1),'America/Chicago',['01:30'])
+    assert following==datetime(2026,11,2,7,30,tzinfo=timezone.utc)
+    spring=next_scheduled_utc(datetime(2026,3,8,6,tzinfo=timezone.utc),'America/Chicago',['02:30'])
+    assert spring==datetime(2026,3,9,7,30,tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_market_aware_calendar_skips_closed_hours_before_requesting_a_decision(tmp_path,monkeypatch):
+    repo=ScheduleRepository(tmp_path/'market-aware.db');now=datetime(2026,7,18,12,tzinfo=timezone.utc)
+    schedule=repo.upsert_schedule('owner','p',timezone_name='UTC',local_times=['12:00'],enabled=True,
+        next_run_at=(now-timedelta(seconds=1)).isoformat(),recurrence={'type':'daily','times':['12:00'],'days':['saturday'],'market_aware':True})
+    fake=FakeRunner({'status':'no_trade','outcome':'NO_TRADE'})
+    worker=AutonomousSchedulerWorker(schedules=repo,runner_factory=lambda:fake)
+    monkeypatch.setattr(worker.brokers,'get_profile',lambda *args:{'profile_v2':{'market_universe':{'mode':'groups','groups':['forex_majors']}}})
+    result=await worker.run_once(now)
+    assert result['skipped']==1 and fake.calls==[]
+    assert repo.list_dispatches('owner')[0]['reason_code']=='market_hours_closed'

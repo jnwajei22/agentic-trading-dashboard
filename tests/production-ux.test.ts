@@ -60,7 +60,7 @@ test("markets use durable watchlists and remain independent from trading account
 test("profile editor uses templates, market multi-select, and preserves scheduling ownership", () => {
   const editor = source("app/(desk)/autonomous/[profileId]/profile-editor.tsx")
   const profile = source("lib/afd/profile.ts")
-  for (const template of ["Conservative Forex", "Balanced Forex", "Aggressive Demo", "Forex Majors", "Metals Focus", "Custom"]) assert.match(editor, new RegExp(template))
+  for (const template of ["Conservative Forex", "Balanced Forex", "Aggressive Demo", "Forex Majors", "Custom"]) assert.match(editor, new RegExp(template))
   assert.match(editor, /beforeunload/)
   assert.match(editor, /Selected-market|selected market|included_instrument_ids/i)
   assert.doesNotMatch(editor, /comma-separated/i)

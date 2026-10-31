@@ -408,7 +408,7 @@ def snapshot_service(tmp_path, monkeypatch, *, fail_component=None, mode="demo_m
         {"accounts": [{"accountId": "a1", "accNum": "7", "currency": "USD"}]})
     account = brokers.list_accounts("user")[0]
     profile = brokers.create_profile("user", name="Manual", account_ref=account["public_id"],
-        execution_mode="demo_manual")
+        execution_mode="demo_manual",news_filter_enabled=False)
     if mode == "demo_autonomous":
         profile = brokers.arm_autonomous_profile("user", profile["public_id"],
             armed_until=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
@@ -802,7 +802,7 @@ def submission_service(tmp_path, monkeypatch, client, *, origin="autonomous"):
         return ({"finnhub": {"available": True, "stale": False},
                  "fred": {"available": True, "stale": False}}, [], {})
     service.context = bound_context
-    monkeypatch.setattr(service.brokers,"get_profile",lambda user,ref:{"public_id":ref,"execution_mode":"demo_autonomous"} if user=="user" and ref=="profile-a" else None)
+    monkeypatch.setattr(service.brokers,"get_profile",lambda user,ref:{"public_id":ref,"execution_mode":"demo_autonomous","enabled":True} if user=="user" and ref=="profile-a" else None)
     service._provider_state = providers
     service._kill_switch = lambda *_: False
     return service, repository, preview["id"], seen_client_args
@@ -1034,3 +1034,31 @@ async def test_pending_entry_is_revalidated_against_current_market_before_dispat
     with pytest.raises(AutonomousExecutionError) as error:
         await service.submit('user',preview_id,'pending:moved-key')
     assert error.value.code=='invalid_pending_entry' and client.place_order_calls==0
+
+
+@pytest.mark.asyncio
+async def test_disabled_strategy_allows_explicit_analysis_reads_but_never_submission(tmp_path,monkeypatch):
+    service,_=configured_service(tmp_path,monkeypatch)
+    service.brokers.update_profile("user",service.test_profile_ref,enabled=False)
+    with pytest.raises(AutonomousExecutionError) as error:
+        await service.context("user",service.test_profile_ref)
+    assert error.value.code=="profile_disabled"
+    analysis=await service.context("user",service.test_profile_ref,require_mode=False)
+    assert analysis.profile_ref==service.test_profile_ref
+    with pytest.raises(AutonomousExecutionError) as error:
+        service._require_submission_permission("user",service.test_profile_ref)
+    assert error.value.code=="profile_disabled"
+
+
+@pytest.mark.asyncio
+async def test_preset_universe_resolves_stable_ids_and_preserves_exclusions(tmp_path,monkeypatch):
+    service,_=configured_service(tmp_path,monkeypatch)
+    async def symbols(self):return [{"tradableInstrumentId":"1","name":"EURUSD","tradable":True,"marketState":"open","assetClass":"forex"}]
+    monkeypatch.setattr(DiscoveryClient,"get_symbols",symbols,raising=False)
+    monkeypatch.setattr(DiscoveryClient,"_instrument_rows",staticmethod(lambda payload:payload),raising=False)
+    ref=service.test_profile_ref
+    service.brokers.update_profile_v2("user",ref,{"market_universe":{"mode":"custom","included_instrument_ids":["1"]}})
+    assert (await service.context("user",ref)).risk["allowed_pairs"]==["EURUSD"]
+    service.brokers.update_profile_v2("user",ref,{"market_universe":{"excluded_instrument_ids":["1"]}})
+    with pytest.raises(AutonomousExecutionError) as error:await service.context("user",ref)
+    assert error.value.code=="no_supported_market_selected"

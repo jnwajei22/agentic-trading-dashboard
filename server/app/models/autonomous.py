@@ -29,6 +29,7 @@ class AutonomousOrderProposal(StrictInputModel):
     entry: float = Field(gt=0, allow_inf_nan=False)
     stop_loss: float = Field(gt=0, allow_inf_nan=False)
     take_profit: float = Field(gt=0, allow_inf_nan=False)
+    confidence: float | None = Field(default=None,ge=0,le=1,allow_inf_nan=False)
     reason_codes: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("reason_codes")

@@ -21,7 +21,7 @@ from app.models.onboarding import (
     TradeLockerOnboardingStatus,
 )
 from app.models.autonomous import ExecutionMode, ExecutionSettingsUpdate
-from app.services.autonomous.execution import AutonomousDemoService, AutonomousExecutionError
+from app.services.autonomous.execution import AutonomousDemoService, AutonomousExecutionError, ALLOWED_PAIRS
 from app.services.autonomous.runner import AutonomousDecisionRunner
 from app.services.autonomous.decision import decision_provider_readiness
 from app.jobs.autonomous_scheduler import AutonomousScheduleService, normalize_recurrence, next_recurrence_utc
@@ -227,11 +227,11 @@ def _profile_with_provider_readiness(profile: dict[str, Any]) -> dict[str, Any]:
 def _capabilities(profile: dict[str, Any], instruments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     instruments = instruments or []
     return {"supported_trading_policy_modes":["adaptive","preset"],
-        "available_presets":[{"id":"hourly_forex","version":"1"}], "available_market_groups":list(MARKET_GROUPS),
+        "available_presets":[{"id":"hourly_forex","version":"1"}], "available_market_groups":["forex_majors"],"supported_execution_symbols":list(ALLOWED_PAIRS),
         "supported_risk_modes":["fixed","adaptive"],
         "supported_stop_modes":["adaptive_structure","volatility","fixed_distance","fixed_percentage"],
-        "supported_take_profit_modes":["reward_to_risk","adaptive_structure","trailing_only","none"],
-        "trailing_stop_capability":{"configured":True,"broker_managed":False},
+        "supported_take_profit_modes":["reward_to_risk","adaptive_structure"],
+        "trailing_stop_capability":{"configured":True,"execution_supported":True,"broker_managed":False,"requires_worker":True},
         "partial_exit_capability":{"configured":True,"execution_supported":False},
         "account_asset_classes":sorted({item["asset_class"] for item in instruments}),
         "live_demo_restrictions":{"demo_execution":True,"live_autonomous_execution":False},
@@ -253,7 +253,7 @@ def _profile_contract(profile: dict[str, Any], instruments: list[dict[str, Any]]
         "field_validation_ranges":{"minimum_confidence":{"minimum":0,"maximum":1},"risk_pct_per_trade":{"exclusive_minimum":0,"maximum":1},
             "daily_loss_limit_pct":{"exclusive_minimum":0,"maximum":3},"drawdown_cutoff_pct":{"exclusive_minimum":0,"maximum":10},
             "capital_equity_percentage":{"exclusive_minimum":0,"maximum":100},"capital_margin_utilization_pct":{"exclusive_minimum":0,"maximum":100}},
-        "account_capabilities":_capabilities(profile, instruments), "available_market_groups":list(MARKET_GROUPS),
+        "account_capabilities":_capabilities(profile, instruments), "available_market_groups":["forex_majors"],"supported_execution_symbols":list(ALLOWED_PAIRS),
         "warnings":warnings, "migration":{"state":migration,"legacy_compatibility":True,"legacy_columns_retained":True}}
 
 
@@ -969,7 +969,7 @@ async def patch_execution_profile_v2(profile_id:str,payload:ExecutionProfileV2Pa
     if payload.automation is not None:patch["automation"]=payload.automation.model_dump(exclude_unset=True)
     try: profile=repository().update_profile_v2(claims["sub"],profile_id,patch)
     except ValidationError as exc:
-        raise HTTPException(status_code=422,detail={"error":"profile_validation_failed","fields":exc.errors(include_url=False)}) from None
+        raise HTTPException(status_code=422,detail={"error":"profile_validation_failed","fields":exc.errors(include_url=False,include_context=False)}) from None
     except BrokerStorageError as exc:
         raise HTTPException(status_code=409,detail=str(exc)) from None
     if not profile:raise HTTPException(status_code=404,detail="Profile not found.")
@@ -994,7 +994,8 @@ async def autonomous_run_audit(run_id:str,claims:dict=Depends(current_claims))->
     compact_market={symbol:{key:value for key,value in data.items() if key!="timeframes"}
                     for symbol,data in market.items() if isinstance(data,dict)}
     return {"run_id":run_id,"outcome":AutonomousDecisionRunner._public_run(record)["outcome"],
-        "selected_market_universe":context.get("allowed_symbols",[]),"markets_currently_open":record.get("validation",{}).get("markets_currently_open",[]),
+        "selected_market_universe":context.get("allowed_symbols") or record.get("validation",{}).get("selected_symbols",[]),
+        "markets_currently_open":record.get("validation",{}).get("open_symbols") or record.get("validation",{}).get("markets_currently_open",[]),
         "candidates_screened":record.get("validation",{}).get("candidates_screened",0),
         "candidates_deeply_analyzed":record.get("validation",{}).get("candidates_deeply_analyzed",0),
         "chosen_instrument":(record.get("decision") or {}).get("symbol"),"trading_policy":context.get("strategy"),
@@ -1130,7 +1131,7 @@ async def run_profile_demo_test(profile_id:str,claims:dict=Depends(current_claim
             f"demo-test:{profile_id}:{uuid.uuid4().hex[:16]}","demo_test",dry_run=True)
         record=ExecutionRepository().get_decision_run(claims["sub"],result.get("run_id")) if result.get("run_id") else None
         return {**result,"decision":(record or {}).get("decision",{}),"validation":(record or {}).get("validation",{}),
-            "dry_run":True,"submission_allowed":False,"message":"Analysis completed without submitting an order."}
+            "dry_run":True,"submission_allowed":False,"message":("The selected markets are closed. No model decision or order was requested." if result.get("outcome")=="MARKET_CLOSED" else "Analysis completed without submitting an order.")}
     except AutonomousExecutionError as exc:raise HTTPException(status_code=409,detail=exc.as_dict()) from None
 
 
@@ -1157,9 +1158,12 @@ async def activity(account_alias:str|None=None,profile_id:str|None=None,event_ty
     for record in execution.recent_executions(claims["sub"],200):
         action=record.get("action_type")
         if action=="autonomous_decision":continue # Already represented by its decision run.
-        if action not in {"submit","close_position","cancel_order"}:continue
+        if action not in {"submit","close_position","cancel_order","update_stop"}:continue
         state=str(record.get("state") or "unknown").lower()
         kind="demo_order_submitted" if action=="submit" else ("position_close_requested" if action=="close_position" else "order_cancel_requested")
+        if action=="update_stop":kind="stop_loss_updated" if state=="verified" else "protection_update_unconfirmed" if state=="unknown" else "protection_update_requested"
+        elif state=="verified" and action!="submit":kind="position_closed" if action=="close_position" else "order_cancelled"
+        if action=="submit" and state in {"unknown","dispatching","dispatched","pending"}:kind="order_submission_uncertain" if state=="unknown" else "order_submission_pending"
         if state in {"rejected","failed","error"}:kind="order_rejected"
         profile=profiles.get(record.get("profile_ref"),{})
         events.append({"id":record.get("id"),"event_type":kind,"occurred_at":record.get("created_at"),
@@ -1184,7 +1188,7 @@ async def activity(account_alias:str|None=None,profile_id:str|None=None,event_ty
         enabled=bool(record.get("new_value"));control=record.get("control_name")
         kind=("kill_switch_enabled" if enabled else "kill_switch_disabled") if control=="global_autonomous_kill_switch" else "safety_control_updated"
         events.append({"id":f"control-{record.get('id')}","event_type":kind,"occurred_at":record.get("changed_at"),
-            "outcome":"CONFIRMED","reason_codes":[record.get("reason")] if record.get("reason") else []})
+            "outcome":"CONFIRMED","summary":record.get("reason") or "Safety control updated.","reason_codes":[]})
     def keep(item:dict[str,Any])->bool:
         stamp=str(item.get("occurred_at") or "")[:10]
         return (not account_alias or item.get("account_alias")==account_alias) and (not profile_id or item.get("profile_id")==profile_id) \

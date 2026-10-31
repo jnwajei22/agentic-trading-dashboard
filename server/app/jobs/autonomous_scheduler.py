@@ -4,7 +4,7 @@ import asyncio
 import logging
 import signal
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Awaitable
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -80,7 +80,7 @@ def _valid_instants(day:date,local_time:str,zone:ZoneInfo)->list[datetime]:
     for fold in (0,1):
         local=naive.replace(tzinfo=zone,fold=fold);utc=local.astimezone(timezone.utc)
         if utc.astimezone(zone).replace(tzinfo=None)==naive and utc not in results:results.append(utc)
-    return sorted(results)
+    return sorted(results)[:1] # One run per wall-clock time on a repeated DST hour.
 
 
 def next_scheduled_utc(after:datetime,timezone_name:str,local_times:list[str])->datetime:
@@ -255,9 +255,12 @@ class AutonomousScheduleService:
 
 class AutonomousSchedulerWorker:
     def __init__(self,*,worker_id:str|None=None,schedules:ScheduleRepository|None=None,
-                 runner_factory:Callable[[],AutonomousDecisionRunner]|None=None)->None:
+                 runner_factory:Callable[[],AutonomousDecisionRunner]|None=None,
+                 position_management:Callable[[],Awaitable[Any]]|None=None,execution_mode:str="scheduled_checks")->None:
         self.worker_id=worker_id or f"worker_{uuid4().hex[:12]}";self.schedules=schedules or ScheduleRepository()
         self.runner_factory=runner_factory or AutonomousDecisionRunner;self._stop=asyncio.Event()
+        self.position_management=position_management;self.execution_mode=execution_mode
+        self.brokers=BrokerRepository(self.schedules.db_path)
 
     @staticmethod
     def _next(schedule:dict[str,Any],after:datetime)->datetime:
@@ -273,6 +276,12 @@ class AutonomousSchedulerWorker:
             if not self.schedules.mark_running(dispatch["id"],self.worker_id,settings.autonomous_scheduler_lease_seconds):
                 counts["skipped"]+=1;logger.info("autonomous_scheduler_lock_contention worker_id=%s dispatch_id=%s",self.worker_id,dispatch["id"]);continue
             try:
+                schedule=self.schedules.get_schedule(dispatch["user_sub"],dispatch["schedule_id"])
+                profile=self.brokers.get_profile(dispatch["user_sub"],dispatch["profile_ref"])
+                if schedule and profile and _recurrence(schedule)["market_aware"] and not _likely_open(profile,current):
+                    self.schedules.finish_dispatch(dispatch["id"],state="skipped",outcome="MARKET_CLOSED",run_id=None,
+                        reason_code="market_hours_closed",summary={"outcome":"MARKET_CLOSED"},safe_retry=False,retry_count=dispatch.get("retry_count",0))
+                    counts["skipped"]+=1;continue
                 result=await dispatch_autonomous_cycle(self.runner_factory(),dispatch["user_sub"],dispatch["profile_ref"],
                     dispatch["run_key"],f"scheduled:{dispatch['id']}",allow_safe_retry=True)
             except Exception:
@@ -307,16 +316,33 @@ class AutonomousSchedulerWorker:
                 counts["completed"]+=1
             logger.info("autonomous_scheduler_outcome worker_id=%s dispatch_id=%s profile_ref=%s outcome=%s reason=%s retry_count=%s",
                 self.worker_id,dispatch["id"],dispatch["profile_ref"],result.get("outcome"),reason,retries)
-        self.schedules.heartbeat(self.worker_id,"running",counts);return counts
+        if self.position_management:
+            try:
+                managed=await asyncio.wait_for(self.position_management(),timeout=max(120,settings.autonomous_maximum_run_duration_seconds))
+                counts["protection_updates"]=sum(item.get("updated",0) for item in managed)
+                counts["protection_unconfirmed"]=sum(item.get("unconfirmed",0) for item in managed)
+            except asyncio.CancelledError:raise
+            except Exception:
+                counts["protection_errors"]=1
+                logger.warning("position_management_cycle_unavailable worker_id=%s",self.worker_id)
+        self.schedules.heartbeat(self.worker_id,"running",{**counts,"mode":self.execution_mode});return counts
 
     async def run_forever(self)->None:
-        self.schedules.heartbeat(self.worker_id,"running",{"phase":"startup"})
+        self.schedules.heartbeat(self.worker_id,"running",{"phase":"startup","mode":self.execution_mode})
+        async def maintain_heartbeat():
+            while not self._stop.is_set():
+                self.schedules.heartbeat(self.worker_id,"running",{"phase":"active","mode":self.execution_mode})
+                try:await asyncio.wait_for(self._stop.wait(),timeout=max(5,min(20,settings.autonomous_scheduler_poll_seconds)))
+                except TimeoutError:pass
+        heartbeat=asyncio.create_task(maintain_heartbeat())
         try:
             while not self._stop.is_set():
                 await self.run_once()
                 try:await asyncio.wait_for(self._stop.wait(),timeout=settings.autonomous_scheduler_poll_seconds)
                 except TimeoutError:pass
-        finally:self.schedules.heartbeat(self.worker_id,"stopped",{"phase":"shutdown"})
+        finally:
+            heartbeat.cancel();await asyncio.gather(heartbeat,return_exceptions=True)
+            self.schedules.heartbeat(self.worker_id,"stopped",{"phase":"shutdown","mode":self.execution_mode})
 
     def stop(self)->None:self._stop.set()
 

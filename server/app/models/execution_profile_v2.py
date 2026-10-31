@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid",allow_inf_nan=False)
 
 
 class TradingPolicy(StrictModel):
@@ -125,10 +125,17 @@ class TrailingStopPolicy(StrictModel):
     trail_value: float | None = Field(None, gt=0)
 
 
+    @model_validator(mode="after")
+    def enabled_values_required(self)->"TrailingStopPolicy":
+        if self.enabled and (self.activation_value is None or self.trail_value is None):
+            raise ValueError("Enabled trailing stops require activation_value and trail_value")
+        return self
+
+
 class BreakEvenPolicy(StrictModel):
     enabled: bool = False
     activation_reward_multiple: float = Field(1.0, gt=0)
-    offset: float = 0
+    offset: float = Field(0, ge=0)
 
 
 class ExitPolicy(StrictModel):
