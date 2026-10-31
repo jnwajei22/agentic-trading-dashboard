@@ -10,7 +10,7 @@ export function AutomationReadiness({ worker, profiles, schedules, runs }: {
   const enabled = new Set(profiles.filter(profile => profile.enabled).map(profile => profile.public_id))
   const steps = [
     {label:"Configure a strategy", detail:"Choose its markets, risk limits, and permissions.", href:profiles[0]?`/autonomous/${profiles[0].public_id}`:"/autonomous?create=1", done:profiles.length > 0},
-    {label:"Test the strategy", detail:"Run analysis without submitting an order.", href:"/autonomous", done:runs.some(run => run.dry_run && run.outcome !== "ERROR")},
+    {label:"Test the strategy", detail:"Run analysis without submitting an order.", href:"/autonomous", done:runs.some(run => run.dry_run && ["TRADE","NO_TRADE"].includes(run.outcome??"") && !(run.reason_codes??[]).some(code=>code.startsWith("provider_")))},
     {label:"Set a schedule", detail:"Save when the enabled strategy should be evaluated.", href:"/schedules?create=1", done:schedules.some(schedule => schedule.enabled && enabled.has(schedule.profile_ref))},
   ]
   return <Card className="overflow-hidden border-border/50">
