@@ -58,7 +58,7 @@ def build_decision_context(snapshot:dict[str,Any],profile:dict[str,Any])->tuple[
         "retrieved_at":snapshot.get("retrieved_at"),"expires_at":snapshot.get("expires_at"),
         "strategy":{"ref":profile.get("strategy_template_id"),"name":profile.get("strategy_name"),"version":profile.get("strategy_version")},
         "profile_policy":profile.get("profile_v2") or {},
-        "allowed_symbols":profile.get("allowed_instruments",[]),"minimum_confidence":profile.get("minimum_confidence",0.7),
+        "allowed_symbols":list(pairs) or profile.get("allowed_instruments",[]),"minimum_confidence":profile.get("minimum_confidence",0.7),
         "account":{"currency":snapshot.get("account",{}).get("account",{}).get("currency"),
             "balance":snapshot.get("account",{}).get("balance"),"equity":snapshot.get("account",{}).get("projected_balance"),
             "available_funds":snapshot.get("account",{}).get("available_funds")},

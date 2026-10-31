@@ -994,7 +994,8 @@ async def autonomous_run_audit(run_id:str,claims:dict=Depends(current_claims))->
     compact_market={symbol:{key:value for key,value in data.items() if key!="timeframes"}
                     for symbol,data in market.items() if isinstance(data,dict)}
     return {"run_id":run_id,"outcome":AutonomousDecisionRunner._public_run(record)["outcome"],
-        "selected_market_universe":context.get("allowed_symbols",[]),"markets_currently_open":record.get("validation",{}).get("markets_currently_open",[]),
+        "selected_market_universe":context.get("allowed_symbols") or record.get("validation",{}).get("selected_symbols",[]),
+        "markets_currently_open":record.get("validation",{}).get("open_symbols") or record.get("validation",{}).get("markets_currently_open",[]),
         "candidates_screened":record.get("validation",{}).get("candidates_screened",0),
         "candidates_deeply_analyzed":record.get("validation",{}).get("candidates_deeply_analyzed",0),
         "chosen_instrument":(record.get("decision") or {}).get("symbol"),"trading_policy":context.get("strategy"),

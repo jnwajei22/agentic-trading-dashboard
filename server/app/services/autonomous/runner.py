@@ -90,7 +90,8 @@ class AutonomousDecisionRunner:
             selected=[item for item in instruments if item["broker_symbol"].replace("/","").upper() in wanted
                 and item["instrument_id"] not in excluded and item["broker_symbol"].replace("/","").upper() not in excluded]
         opened=[item for item in selected if market_is_open(item,now)]
-        return {"selected_market_universe":[item["instrument_id"] for item in selected],
+        return {"selected_symbols":[item["broker_symbol"] for item in selected],"open_symbols":[item["broker_symbol"] for item in opened],
+            "selected_market_universe":[item["instrument_id"] for item in selected],
             "markets_currently_open":[item["instrument_id"] for item in opened],"open":bool(opened)}
 
     @staticmethod

@@ -69,3 +69,9 @@ def test_decision_run_claim_is_idempotent_and_single_active(tmp_path):
     claimed,active=storage.claim_decision_run({**base,"id":"r3","run_key":"key-67890"});assert not claimed and active["id"]=="r1"
     storage.update_decision_run("r1",state="no_trade",completed_at=now)
     claimed,_=storage.claim_decision_run({**base,"id":"r3","run_key":"key-67890"});assert claimed
+
+
+def test_model_allowed_symbols_use_resolved_markets_instead_of_broker_ids():
+    context,_=build_decision_context({'market':{'pairs':{'EURUSD':{'bid':1.1,'ask':1.1001}}}},
+        {'allowed_instruments':['4665']})
+    assert context['allowed_symbols']==['EURUSD']
